@@ -1,0 +1,39 @@
+customs:
+  source: "haiguan"
+  base_url: "https://stats.customs.gov.cn"
+  api_key: ""
+  rate_limit_per_sec: 1
+
+manufacturers:
+  sources:
+    - name: "1688"
+      base_url: "https://s.1688.com"
+    - name: "made-in-china"
+      base_url: "https://www.made-in-china.com"
+  max_pages: 20
+
+classification:
+  categories:
+    hardware_tools:
+      hs_prefixes: ["8201", "8202", "8203", "8204", "8205", "8206", "8207", "8208"]
+    building_hardware:
+      hs_prefixes: ["7307", "7308", "7317", "7318", "8301", "8302"]
+
+target_countries:
+  - NG  # Nigeria
+  - ZA  # South Africa
+  - EG  # Egypt
+  - KE  # Kenya
+  - ET  # Ethiopia
+  - MA  # Morocco
+  - DZ  # Algeria
+  - GH  # Ghana
+
+storage:
+  db_url: "sqlite:///data/platform.db"
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+
+logging:
+  level: "INFO"
+  file: "data/platform.log"
