@@ -1,8 +1,19 @@
 customs:
-  source: "haiguan"
-  base_url: "https://stats.customs.gov.cn"
-  api_key: ""
   rate_limit_per_sec: 1
+  sources:
+    gacc:
+      enabled: true
+      base_url: "http://stats.customs.gov.cn"
+      cache_dir: "data/raw/gacc"
+    importgenius:
+      enabled: false
+      base_url: "https://api.importgenius.com/v1"
+      api_key: ""
+    tendata:
+      enabled: false
+      base_url: "https://api.tendata.com/v1"
+      api_key: ""
+      account: ""
 
 manufacturers:
   sources:
