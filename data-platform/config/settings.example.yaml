@@ -3,8 +3,27 @@ customs:
   sources:
     gacc:
       enabled: true
-      base_url: "http://stats.customs.gov.cn"
+      base_url: "http://43.248.49.97"
       cache_dir: "data/raw/gacc"
+      user_agent: "Mozilla/5.0 DataPlatform/0.1"
+      # 当官网改版时，以下键可覆盖默认映射（不填则用 DEFAULT_QUERY）。
+      # query:
+      #   path: "/indexEn/query/queryData"
+      #   request_params:
+      #     currency: "currencyType"
+      #     year: "year"
+      #     month_from: "monthFrom"
+      #     month_to: "monthTo"
+      #     country: "countryCode"
+      #     direction: "direction"
+      #     hs_granularity: "hsCodeType"
+      #   response:
+      #     list_key: "data"
+      #     fields:
+      #       hs_code: "HS_CODE_8"
+      #       value_usd: "AMOUNT_USD"
+      #       quantity: "QUANTITY"
+      #       unit: "UNIT"
     importgenius:
       enabled: false
       base_url: "https://api.importgenius.com/v1"

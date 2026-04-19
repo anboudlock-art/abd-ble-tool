@@ -73,6 +73,32 @@ uvicorn --factory src.api.app:create_app --port 8000
    python -m src.pipelines.ingest --country NG --year 2024 --month 6
    ```
 
+## GACC（海关总署）使用
+
+### 路径 A：queryData HTTP 接口（无需凭证）
+
+默认 URL、参数名、返回字段都在 `src/crawlers/gacc.py` 的 `DEFAULT_QUERY` 里，
+已按公开观测的请求结构填好。官网若改版，在 `settings.yaml` 加 `customs.sources.gacc.query.*`
+覆盖即可（见示例注释），无需改代码。抓取结果会缓存在 `data/raw/gacc/{ISO2}_{year}_{mm}.json`，
+重复查询不再打接口。
+
+```bash
+python -m src.pipelines.ingest --country NG --year 2024 --month 6 --source gacc
+```
+
+### 路径 B：Excel 月报（最稳定）
+
+海关官网每月公布《出口重点国别（地区）分商品量值表》xlsx，口径权威、格式稳定。
+下载后直接解析（支持中文/英文列头自动匹配）：
+
+```python
+from src import config
+from src.crawlers.gacc import GACCSource
+src = GACCSource(config.load())
+for rec in src.ingest_excel("downloads/2024-06-NG.xlsx", country="NG", year=2024, month=6):
+    print(rec)
+```
+
 ## 数据源对比
 
 | 源 | 免费 | 厂家名 | 粒度 | 覆盖 |
