@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>中国→非洲 出口数据查询</title>
+<style>
+  body { font-family: -apple-system, "PingFang SC", sans-serif; margin: 24px; background: #f7f8fa; color: #222; }
+  h1 { font-size: 20px; margin: 0 0 16px; }
+  .filters { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .filters label { display: flex; flex-direction: column; font-size: 12px; color: #666; }
+  .filters input, .filters select { padding: 6px 8px; font-size: 14px; border: 1px solid #d0d7de; border-radius: 4px; min-width: 120px; }
+  button { padding: 8px 16px; background: #0969da; color: white; border: 0; border-radius: 4px; cursor: pointer; }
+  button:hover { background: #0860c7; }
+  .panel { background: white; border: 1px solid #d0d7de; border-radius: 6px; padding: 16px; margin-bottom: 16px; }
+  .panel h2 { font-size: 16px; margin: 0 0 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eaeef2; }
+  th { background: #f6f8fa; font-weight: 600; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .muted { color: #888; }
+  #trends-chart { width: 100%; height: 280px; }
+</style>
+</head>
+<body>
+<h1>中国→非洲 出口数据查询</h1>
+
+<div class="filters panel">
+  <label>类目
+    <select id="category">
+      <option value="">全部</option>
+      <option value="hardware_tools">五金工具</option>
+      <option value="building_hardware">建材五金</option>
+    </select>
+  </label>
+  <label>目的国
+    <select id="country">
+      <option value="">全部</option>
+      <option>NG</option><option>ZA</option><option>EG</option><option>KE</option>
+      <option>ET</option><option>MA</option><option>DZ</option><option>GH</option>
+    </select>
+  </label>
+  <label>年份
+    <input id="year" type="number" value="2024" min="2018" max="2030" />
+  </label>
+  <label>排序
+    <select id="order">
+      <option value="value">按金额</option>
+      <option value="count">按发货次数</option>
+    </select>
+  </label>
+  <label>&nbsp;<button id="apply">查询</button></label>
+</div>
+
+<div class="panel">
+  <h2>工厂排名 TOP 20</h2>
+  <table id="ranking">
+    <thead>
+      <tr>
+        <th>#</th><th>工厂</th>
+        <th class="num">发货次数</th>
+        <th class="num">总金额 (USD)</th>
+        <th class="num">总数量</th>
+      </tr>
+    </thead>
+    <tbody><tr><td colspan="5" class="muted">点击"查询"加载数据</td></tr></tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <h2>月度趋势</h2>
+  <canvas id="trends-chart"></canvas>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+let chart;
+
+async function load() {
+  const category = document.getElementById('category').value;
+  const country = document.getElementById('country').value;
+  const year = document.getElementById('year').value;
+  const order = document.getElementById('order').value;
+
+  const params = new URLSearchParams();
+  if (category) params.set('category', category);
+  if (country) params.set('country', country);
+  if (year) params.set('year', year);
+
+  const rankingParams = new URLSearchParams(params);
+  rankingParams.set('limit', '20');
+  rankingParams.set('order_by', order);
+
+  const [ranking, trends] = await Promise.all([
+    fetch('/api/manufacturers/ranking?' + rankingParams).then(r => r.json()),
+    fetch('/api/shipments/trends?' + params).then(r => r.json()),
+  ]);
+
+  renderRanking(ranking);
+  renderTrends(trends);
+}
+
+function renderRanking(rows) {
+  const tbody = document.querySelector('#ranking tbody');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="muted">无数据</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map((r, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${r.manufacturer_name}</td>
+      <td class="num">${r.shipment_count.toLocaleString()}</td>
+      <td class="num">${r.total_value_usd.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
+      <td class="num">${r.total_quantity.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
+    </tr>
+  `).join('');
+}
+
+function renderTrends(points) {
+  const labels = points.map(p => `${p.year}-${String(p.month).padStart(2, '0')}`);
+  const values = points.map(p => p.total_value_usd);
+  const counts = points.map(p => p.shipment_count);
+
+  if (chart) chart.destroy();
+  const ctx = document.getElementById('trends-chart');
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: '总金额 (USD)', data: values, borderColor: '#0969da', yAxisID: 'y', tension: 0.2 },
+        { label: '发货次数', data: counts, borderColor: '#cf222e', yAxisID: 'y1', tension: 0.2 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        y: { position: 'left', title: { display: true, text: 'USD' } },
+        y1: { position: 'right', title: { display: true, text: '次数' }, grid: { drawOnChartArea: false } },
+      },
+    },
+  });
+}
+
+document.getElementById('apply').addEventListener('click', load);
+load();
+</script>
+</body>
+</html>

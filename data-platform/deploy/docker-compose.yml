@@ -1,0 +1,25 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: export-data-platform:latest
+    container_name: export-data-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../data:/app/data
+      - ../config/settings.yaml:/app/config/settings.yaml:ro
+    restart: unless-stopped
+
+  seed:
+    image: export-data-platform:latest
+    depends_on:
+      - api
+    volumes:
+      - ../data:/app/data
+      - ../config/settings.yaml:/app/config/settings.yaml:ro
+    command: ["python", "-m", "src.seed", "--shipments-per-mfr", "40"]
+    profiles: ["seed"]
