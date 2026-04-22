@@ -1,0 +1,653 @@
+// Prisma schema for Anboud LoRa-BLE Smart Lock Platform.
+// Mirrors docs/data-model.md v0.1.
+// Regenerate client with: pnpm db:generate
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// Organization
+// ============================================================
+
+enum Industry {
+  logistics
+  security
+  other
+}
+
+enum CompanyStatus {
+  active
+  suspended
+}
+
+enum CompanyPlan {
+  trial
+  standard
+  enterprise
+}
+
+model Company {
+  id             BigInt         @id @default(autoincrement())
+  ulid           String         @unique @default(cuid())
+  name           String         @db.VarChar(128)
+  shortCode      String?        @unique @map("short_code") @db.VarChar(32)
+  industry       Industry       @default(other)
+  contactName    String?        @map("contact_name") @db.VarChar(64)
+  contactPhone   String?        @map("contact_phone") @db.VarChar(32)
+  status         CompanyStatus  @default(active)
+  plan           CompanyPlan    @default(trial)
+  maxDevices     Int?           @map("max_devices")
+  createdByUserId BigInt?       @map("created_by_user_id")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  deletedAt      DateTime?      @map("deleted_at")
+
+  departments    Department[]
+  teams          Team[]
+  users          User[]
+  devices        Device[]
+  gateways       Gateway[]
+  integrationApps IntegrationApp[]
+
+  @@index([status])
+  @@map("company")
+}
+
+model Department {
+  id         BigInt     @id @default(autoincrement())
+  ulid       String     @unique @default(cuid())
+  companyId  BigInt     @map("company_id")
+  parentId   BigInt?    @map("parent_id")
+  name       String     @db.VarChar(128)
+  code       String?    @db.VarChar(32)
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @map("updated_at")
+  deletedAt  DateTime?  @map("deleted_at")
+
+  company    Company    @relation(fields: [companyId], references: [id])
+  parent     Department? @relation("DepartmentHierarchy", fields: [parentId], references: [id])
+  children   Department[] @relation("DepartmentHierarchy")
+  teams      Team[]
+
+  @@index([companyId])
+  @@index([parentId])
+  @@map("department")
+}
+
+model Team {
+  id            BigInt     @id @default(autoincrement())
+  ulid          String     @unique @default(cuid())
+  companyId     BigInt     @map("company_id")
+  departmentId  BigInt     @map("department_id")
+  name          String     @db.VarChar(128)
+  leaderUserId  BigInt?    @map("leader_user_id")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+  deletedAt     DateTime?  @map("deleted_at")
+
+  company       Company    @relation(fields: [companyId], references: [id])
+  department    Department @relation(fields: [departmentId], references: [id])
+  memberships   UserMembership[]
+  devices       Device[]
+  assignments   DeviceAssignment[]
+  deployments   DeviceDeployment[]
+
+  @@index([companyId])
+  @@index([departmentId])
+  @@map("team")
+}
+
+enum UserRole {
+  vendor_admin
+  company_admin
+  dept_admin
+  team_leader
+  member
+  production_operator
+}
+
+enum UserStatus {
+  active
+  locked
+  invited
+}
+
+model User {
+  id            BigInt     @id @default(autoincrement())
+  ulid          String     @unique @default(cuid())
+  companyId     BigInt?    @map("company_id")
+  phone         String     @unique @db.VarChar(32)
+  email         String?    @db.VarChar(128)
+  name          String     @db.VarChar(64)
+  employeeNo    String?    @map("employee_no") @db.VarChar(32)
+  passwordHash  String?    @map("password_hash") @db.VarChar(255)
+  role          UserRole   @default(member)
+  status        UserStatus @default(active)
+  lastLoginAt   DateTime?  @map("last_login_at")
+  avatarUrl     String?    @map("avatar_url") @db.VarChar(512)
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+  deletedAt     DateTime?  @map("deleted_at")
+
+  company         Company?          @relation(fields: [companyId], references: [id])
+  memberships     UserMembership[]
+  deploymentsDone DeviceDeployment[] @relation("DeploymentOperator")
+  commandsIssued  DeviceCommand[]   @relation("CommandIssuer")
+  assignmentsGranted DeviceAssignment[] @relation("AssignmentGranter")
+  assignmentsReceived DeviceAssignment[] @relation("AssignmentReceiver")
+  auditLogs       AuditLog[]
+
+  @@index([companyId])
+  @@index([role])
+  @@map("user")
+}
+
+enum TeamRole {
+  leader
+  member
+}
+
+model UserMembership {
+  id        BigInt   @id @default(autoincrement())
+  userId    BigInt   @map("user_id")
+  teamId    BigInt   @map("team_id")
+  roleInTeam TeamRole @default(member) @map("role_in_team")
+  joinedAt  DateTime @default(now()) @map("joined_at")
+
+  user      User     @relation(fields: [userId], references: [id])
+  team      Team     @relation(fields: [teamId], references: [id])
+
+  @@unique([userId, teamId])
+  @@index([teamId])
+  @@map("user_membership")
+}
+
+// ============================================================
+// Devices
+// ============================================================
+
+enum DeviceCategory {
+  gps_lock
+  eseal
+  fourg_eseal
+  fourg_padlock
+}
+
+enum DeviceScene {
+  logistics
+  security
+}
+
+model DeviceModel {
+  id                BigInt         @id @default(autoincrement())
+  code              String         @unique @db.VarChar(32)
+  name              String         @db.VarChar(128)
+  category          DeviceCategory
+  scene             DeviceScene
+  hasBle            Boolean        @default(true) @map("has_ble")
+  has4g             Boolean        @default(false) @map("has_4g")
+  hasGps            Boolean        @default(false) @map("has_gps")
+  hasLora           Boolean        @default(false) @map("has_lora")
+  firmwareDefault   String?        @map("firmware_default") @db.VarChar(32)
+  capabilitiesJson  Json?          @map("capabilities_json")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+
+  devices           Device[]
+  batches           ProductionBatch[]
+
+  @@map("device_model")
+}
+
+enum DeviceStatus {
+  manufactured
+  in_warehouse
+  shipped
+  delivered
+  assigned
+  active
+  returned
+  retired
+}
+
+enum OwnerType {
+  vendor
+  company
+}
+
+enum LockState {
+  opened
+  closed
+  tampered
+  unknown
+}
+
+enum QcStatus {
+  pending
+  passed
+  failed
+}
+
+model Device {
+  id                 BigInt       @id @default(autoincrement())
+  ulid               String       @unique @default(cuid())
+  lockId             String       @unique @map("lock_id") @db.VarChar(32)
+  bleMac             String       @unique @map("ble_mac") @db.VarChar(17)
+  imei               String?      @unique @db.VarChar(20)
+  modelId            BigInt       @map("model_id")
+  batchId            BigInt?      @map("batch_id")
+  firmwareVersion    String?      @map("firmware_version") @db.VarChar(32)
+  qcStatus           QcStatus     @default(pending) @map("qc_status")
+  producedAt         DateTime?    @map("produced_at")
+  status             DeviceStatus @default(manufactured)
+  ownerType          OwnerType    @default(vendor) @map("owner_type")
+  ownerCompanyId     BigInt?      @map("owner_company_id")
+  currentTeamId      BigInt?      @map("current_team_id")
+  locationLat        Decimal?     @map("location_lat") @db.Decimal(10, 7)
+  locationLng        Decimal?     @map("location_lng") @db.Decimal(10, 7)
+  locationAccuracyM  Int?         @map("location_accuracy_m")
+  doorLabel          String?      @map("door_label") @db.VarChar(128)
+  deployedAt         DateTime?    @map("deployed_at")
+  deployedByUserId   BigInt?      @map("deployed_by_user_id")
+  lastState          LockState    @default(unknown) @map("last_state")
+  lastBattery        Int?         @map("last_battery") @db.SmallInt
+  lastSeenAt         DateTime?    @map("last_seen_at")
+  gatewayId          BigInt?      @map("gateway_id")
+  loraE220Addr       Int?         @map("lora_e220_addr")
+  loraChannel        Int?         @map("lora_channel") @db.SmallInt
+  serverIp           String?      @map("server_ip") @db.VarChar(64)
+  serverPort         Int?         @map("server_port")
+  notes              String?      @db.Text
+  createdAt          DateTime     @default(now()) @map("created_at")
+  updatedAt          DateTime     @updatedAt @map("updated_at")
+  deletedAt          DateTime?    @map("deleted_at")
+
+  model              DeviceModel  @relation(fields: [modelId], references: [id])
+  batch              ProductionBatch? @relation(fields: [batchId], references: [id])
+  ownerCompany       Company?     @relation(fields: [ownerCompanyId], references: [id])
+  currentTeam        Team?        @relation(fields: [currentTeamId], references: [id])
+  gateway            Gateway?     @relation(fields: [gatewayId], references: [id])
+  transfers          DeviceTransfer[]
+  deployments        DeviceDeployment[]
+  assignments        DeviceAssignment[]
+  events             LockEvent[]
+  commands           DeviceCommand[]
+  productionScans    ProductionScan[]
+
+  @@index([status])
+  @@index([ownerCompanyId, status])
+  @@index([currentTeamId])
+  @@index([gatewayId])
+  @@map("device")
+}
+
+model ProductionBatch {
+  id             BigInt   @id @default(autoincrement())
+  ulid           String   @unique @default(cuid())
+  batchNo        String   @unique @map("batch_no") @db.VarChar(32)
+  modelId        BigInt   @map("model_id")
+  quantity       Int
+  producedCount  Int      @default(0) @map("produced_count")
+  producedAt     DateTime? @map("produced_at") @db.Date
+  operatorUserId BigInt?  @map("operator_user_id")
+  remark         String?  @db.Text
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  model          DeviceModel @relation(fields: [modelId], references: [id])
+  devices        Device[]
+  scans          ProductionScan[]
+
+  @@map("production_batch")
+}
+
+model DeviceTransfer {
+  id             BigInt       @id @default(autoincrement())
+  deviceId       BigInt       @map("device_id")
+  fromStatus     DeviceStatus @map("from_status")
+  toStatus       DeviceStatus @map("to_status")
+  fromOwnerType  OwnerType?   @map("from_owner_type")
+  fromOwnerId    BigInt?      @map("from_owner_id")
+  toOwnerType    OwnerType?   @map("to_owner_type")
+  toOwnerId      BigInt?      @map("to_owner_id")
+  operatorUserId BigInt?      @map("operator_user_id")
+  reason         String?      @db.VarChar(255)
+  metadata       Json?
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  device         Device       @relation(fields: [deviceId], references: [id])
+
+  @@index([deviceId, createdAt])
+  @@map("device_transfer")
+}
+
+model DeviceDeployment {
+  id              BigInt   @id @default(autoincrement())
+  deviceId        BigInt   @map("device_id")
+  operatorUserId  BigInt   @map("operator_user_id")
+  teamId          BigInt?  @map("team_id")
+  lat             Decimal? @db.Decimal(10, 7)
+  lng             Decimal? @db.Decimal(10, 7)
+  accuracyM       Int?     @map("accuracy_m")
+  doorLabel       String?  @map("door_label") @db.VarChar(128)
+  photoUrls       Json?    @map("photo_urls")
+  deployedAt      DateTime @default(now()) @map("deployed_at")
+
+  device          Device   @relation(fields: [deviceId], references: [id])
+  operator        User     @relation("DeploymentOperator", fields: [operatorUserId], references: [id])
+  team            Team?    @relation(fields: [teamId], references: [id])
+
+  @@index([deviceId, deployedAt])
+  @@map("device_deployment")
+}
+
+enum AssignmentScope {
+  company
+  team
+  user
+}
+
+model DeviceAssignment {
+  id                BigInt          @id @default(autoincrement())
+  deviceId          BigInt          @map("device_id")
+  companyId         BigInt          @map("company_id")
+  scope             AssignmentScope
+  teamId            BigInt?         @map("team_id")
+  userId            BigInt?         @map("user_id")
+  validFrom         DateTime?       @map("valid_from")
+  validUntil        DateTime?       @map("valid_until")
+  grantedByUserId   BigInt?         @map("granted_by_user_id")
+  revokedAt         DateTime?       @map("revoked_at")
+  createdAt         DateTime        @default(now()) @map("created_at")
+
+  device            Device          @relation(fields: [deviceId], references: [id])
+  team              Team?           @relation(fields: [teamId], references: [id])
+  user              User?           @relation("AssignmentReceiver", fields: [userId], references: [id])
+  grantedBy         User?           @relation("AssignmentGranter", fields: [grantedByUserId], references: [id])
+
+  @@index([deviceId, revokedAt])
+  @@index([teamId])
+  @@index([userId])
+  @@map("device_assignment")
+}
+
+// ============================================================
+// Gateways
+// ============================================================
+
+enum GatewayStatus {
+  provisioning
+  active
+  suspended
+  retired
+}
+
+model Gateway {
+  id            BigInt        @id @default(autoincrement())
+  ulid          String        @unique @default(cuid())
+  gwId          String        @unique @map("gw_id") @db.VarChar(16)
+  token         String        @db.VarChar(32)
+  companyId     BigInt?       @map("company_id")
+  model         String        @default("E90-DTU(900SL22-GPRS)") @db.VarChar(64)
+  locationLat   Decimal?      @map("location_lat") @db.Decimal(10, 7)
+  locationLng   Decimal?      @map("location_lng") @db.Decimal(10, 7)
+  locationNote  String?       @map("location_note") @db.VarChar(255)
+  loraFreqBand  Int?          @map("lora_freq_band") @db.SmallInt
+  loraChannel   Int?          @map("lora_channel") @db.SmallInt
+  status        GatewayStatus @default(provisioning)
+  lastSeenAt    DateTime?     @map("last_seen_at")
+  online        Boolean       @default(false)
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+  deletedAt     DateTime?     @map("deleted_at")
+
+  company       Company?      @relation(fields: [companyId], references: [id])
+  sessions      GatewaySession[]
+  devices       Device[]
+  events        LockEvent[]
+  commands      DeviceCommand[]
+
+  @@index([companyId])
+  @@index([online])
+  @@map("gateway")
+}
+
+model GatewaySession {
+  id                 BigInt    @id @default(autoincrement())
+  gatewayId          BigInt    @map("gateway_id")
+  clientIp           String    @map("client_ip") @db.VarChar(64)
+  connectedAt        DateTime  @default(now()) @map("connected_at")
+  disconnectedAt     DateTime? @map("disconnected_at")
+  disconnectReason   String?   @map("disconnect_reason") @db.VarChar(128)
+
+  gateway            Gateway   @relation(fields: [gatewayId], references: [id])
+
+  @@index([gatewayId, connectedAt])
+  @@map("gateway_session")
+}
+
+// ============================================================
+// Events and Commands
+// ============================================================
+
+enum LockEventType {
+  opened
+  closed
+  tampered
+  heartbeat
+  low_battery
+  offline
+  online
+}
+
+enum LockEventSource {
+  ble
+  lora
+  fourg
+  system
+}
+
+model LockEvent {
+  id               BigInt           @id @default(autoincrement())
+  deviceId         BigInt           @map("device_id")
+  companyId        BigInt?          @map("company_id")
+  eventType        LockEventType    @map("event_type")
+  source           LockEventSource
+  battery          Int?             @db.SmallInt
+  lat              Decimal?         @db.Decimal(10, 7)
+  lng              Decimal?         @db.Decimal(10, 7)
+  gatewayId        BigInt?          @map("gateway_id")
+  operatorUserId   BigInt?          @map("operator_user_id")
+  rawPayload       Bytes?           @map("raw_payload")
+  dedupKey         String?          @map("dedup_key") @db.VarChar(128)
+  createdAt        DateTime         @map("created_at")
+  receivedAt       DateTime         @default(now()) @map("received_at")
+
+  device           Device           @relation(fields: [deviceId], references: [id])
+  gateway          Gateway?         @relation(fields: [gatewayId], references: [id])
+  resolvedCommands DeviceCommand[]  @relation("CommandResult")
+
+  @@index([deviceId, createdAt(sort: Desc)])
+  @@index([companyId, createdAt(sort: Desc)])
+  @@index([eventType, createdAt(sort: Desc)])
+  @@index([dedupKey])
+  @@map("lock_event")
+}
+
+enum DeviceCommandType {
+  unlock
+  lock
+  query_status
+  config_network
+}
+
+enum DeviceCommandSource {
+  web
+  app
+  api
+}
+
+enum DeviceCommandStatus {
+  pending
+  sent
+  acked
+  timeout
+  failed
+}
+
+model DeviceCommand {
+  id              BigInt                @id @default(autoincrement())
+  deviceId        BigInt                @map("device_id")
+  commandType     DeviceCommandType     @map("command_type")
+  issuedByUserId  BigInt                @map("issued_by_user_id")
+  source          DeviceCommandSource
+  gatewayId       BigInt?               @map("gateway_id")
+  requestPayload  Bytes?                @map("request_payload")
+  status          DeviceCommandStatus   @default(pending)
+  retries         Int                   @default(0) @db.SmallInt
+  sentAt          DateTime?             @map("sent_at")
+  ackedAt         DateTime?             @map("acked_at")
+  timeoutAt       DateTime?             @map("timeout_at")
+  resultEventId   BigInt?               @map("result_event_id")
+  errorMessage    String?               @map("error_message") @db.VarChar(255)
+  createdAt       DateTime              @default(now()) @map("created_at")
+
+  device          Device                @relation(fields: [deviceId], references: [id])
+  issuedBy        User                  @relation("CommandIssuer", fields: [issuedByUserId], references: [id])
+  gateway         Gateway?              @relation(fields: [gatewayId], references: [id])
+  resultEvent     LockEvent?            @relation("CommandResult", fields: [resultEventId], references: [id])
+
+  @@index([deviceId, createdAt])
+  @@index([status, timeoutAt])
+  @@map("device_command")
+}
+
+// ============================================================
+// Production
+// ============================================================
+
+model ProductionScan {
+  id                   BigInt    @id @default(autoincrement())
+  batchId              BigInt?   @map("batch_id")
+  deviceId             BigInt?   @map("device_id")
+  operatorUserId       BigInt?   @map("operator_user_id")
+  qrScanned            String?   @map("qr_scanned") @db.VarChar(64)
+  bleMacRead           String?   @map("ble_mac_read") @db.VarChar(17)
+  imeiRead             String?   @map("imei_read") @db.VarChar(20)
+  firmwareVersionRead  String?   @map("firmware_version_read") @db.VarChar(32)
+  qcResult             QcStatus  @default(pending) @map("qc_result")
+  qcRemark             String?   @map("qc_remark") @db.VarChar(255)
+  scannedAt            DateTime  @default(now()) @map("scanned_at")
+  durationMs           Int?      @map("duration_ms")
+
+  batch                ProductionBatch? @relation(fields: [batchId], references: [id])
+  device               Device?          @relation(fields: [deviceId], references: [id])
+
+  @@index([batchId])
+  @@index([scannedAt])
+  @@map("production_scan")
+}
+
+// ============================================================
+// Integration API
+// ============================================================
+
+enum IntegrationAppStatus {
+  active
+  revoked
+}
+
+model IntegrationApp {
+  id              BigInt               @id @default(autoincrement())
+  ulid            String               @unique @default(cuid())
+  companyId       BigInt               @map("company_id")
+  name            String               @db.VarChar(128)
+  appKey          String               @unique @map("app_key") @db.VarChar(32)
+  appSecretHash   String               @map("app_secret_hash") @db.VarChar(255)
+  scopes          Json
+  ipWhitelist     Json?                @map("ip_whitelist")
+  status          IntegrationAppStatus @default(active)
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+  deletedAt       DateTime?            @map("deleted_at")
+
+  company         Company              @relation(fields: [companyId], references: [id])
+  webhookSubs     WebhookSubscription[]
+
+  @@index([companyId])
+  @@map("integration_app")
+}
+
+model WebhookSubscription {
+  id                BigInt   @id @default(autoincrement())
+  integrationAppId  BigInt   @map("integration_app_id")
+  url               String   @db.VarChar(512)
+  eventTypes        Json     @map("event_types")
+  secret            String   @db.VarChar(64)
+  active            Boolean  @default(true)
+  lastSuccessAt     DateTime? @map("last_success_at")
+  lastFailureAt     DateTime? @map("last_failure_at")
+  failureCount      Int      @default(0) @map("failure_count")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  integrationApp    IntegrationApp @relation(fields: [integrationAppId], references: [id])
+  deliveries        WebhookDelivery[]
+
+  @@index([integrationAppId])
+  @@map("webhook_subscription")
+}
+
+model WebhookDelivery {
+  id              BigInt   @id @default(autoincrement())
+  subscriptionId  BigInt   @map("subscription_id")
+  eventId         BigInt   @map("event_id")
+  httpStatus      Int?     @map("http_status") @db.SmallInt
+  responseBody    String?  @map("response_body") @db.Text
+  durationMs      Int?     @map("duration_ms")
+  attempt         Int      @default(1) @db.SmallInt
+  sentAt          DateTime @default(now()) @map("sent_at")
+
+  subscription    WebhookSubscription @relation(fields: [subscriptionId], references: [id])
+
+  @@index([subscriptionId, sentAt])
+  @@map("webhook_delivery")
+}
+
+// ============================================================
+// System
+// ============================================================
+
+model AuditLog {
+  id           BigInt   @id @default(autoincrement())
+  companyId    BigInt?  @map("company_id")
+  actorUserId  BigInt?  @map("actor_user_id")
+  actorIp      String?  @map("actor_ip") @db.VarChar(64)
+  action       String   @db.VarChar(64)
+  targetType   String?  @map("target_type") @db.VarChar(32)
+  targetId     BigInt?  @map("target_id")
+  diff         Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  actor        User?    @relation(fields: [actorUserId], references: [id])
+
+  @@index([companyId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_log")
+}
+
+model SystemConfig {
+  id        BigInt   @id @default(autoincrement())
+  key       String   @unique @db.VarChar(64)
+  value     Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("system_config")
+}

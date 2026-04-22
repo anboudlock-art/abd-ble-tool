@@ -1,0 +1,45 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build outputs
+dist/
+build/
+out/
+.next/
+.turbo/
+*.tsbuildinfo
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+logs/
+
+# env
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# os
+.DS_Store
+Thumbs.db
+
+# test
+coverage/
+
+# prisma
+prisma/migrations/dev/
+
+# android (old reference project)
+abd-ble-tool.tar/abd-ble-tool/.gradle/
+abd-ble-tool.tar/abd-ble-tool/build/
+abd-ble-tool.tar/abd-ble-tool/app/build/
+abd-ble-tool.tar/abd-ble-tool/local.properties
