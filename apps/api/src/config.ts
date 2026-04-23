@@ -11,6 +11,7 @@ const ConfigSchema = z.object({
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
   CORS_ORIGIN: z.string().default('http://localhost:3000'),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
+  VENDOR_BOOTSTRAP_TOKEN: z.string().optional(),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
