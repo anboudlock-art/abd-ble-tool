@@ -1,3 +1,3 @@
-export * from './enums';
-export * from './api-errors';
-export * from './schemas';
+export * from './enums.js';
+export * from './api-errors.js';
+export * from './schemas.js';
