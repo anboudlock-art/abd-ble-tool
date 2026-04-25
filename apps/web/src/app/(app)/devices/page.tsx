@@ -1,15 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Search } from 'lucide-react';
+import { Search, Truck } from 'lucide-react';
 import { apiRequest, type DeviceListResp, type DeviceModel } from '@/lib/api';
-import { Card, CardHeader } from '@/components/ui/Card';
+import { Card } from '@/components/ui/Card';
 import { Table, THead, TBody, Tr, Th, Td, EmptyState } from '@/components/ui/Table';
 import { Badge, deviceStatusLabel, deviceStatusTone } from '@/components/ui/Badge';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
+import { ShipDialog } from '@/components/ShipDialog';
+import { useAuth } from '@/providers/AuthProvider';
 
 const STATUS_OPTIONS = [
   '',
@@ -24,11 +26,16 @@ const STATUS_OPTIONS = [
 ];
 
 export default function DevicesPage() {
+  const { user } = useAuth();
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [modelId, setModelId] = useState('');
   const [page, setPage] = useState(1);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showShipDialog, setShowShipDialog] = useState(false);
   const pageSize = 20;
+
+  const isVendor = user?.role === 'vendor_admin';
 
   const modelsQ = useQuery({
     queryKey: ['device-models'],
@@ -52,12 +59,49 @@ export default function DevicesPage() {
   const data = devicesQ.data;
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
 
+  // Only in_warehouse devices may be shipped
+  const selectableIds = useMemo(
+    () =>
+      (data?.items ?? [])
+        .filter((d) => d.status === 'in_warehouse')
+        .map((d) => d.id),
+    [data],
+  );
+
+  const selectedShippable = useMemo(
+    () =>
+      Array.from(selected).filter((id) => selectableIds.includes(id)),
+    [selected, selectableIds],
+  );
+
+  const toggleAll = () => {
+    if (selected.size === selectableIds.length && selectableIds.length > 0) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(selectableIds));
+    }
+  };
+
+  const toggleOne = (id: string) => {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelected(next);
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-slate-900">设备</h1>
-        <div className="text-sm text-slate-500">
-          共 <span className="font-semibold text-slate-700">{data?.total ?? '—'}</span> 台
+        <div className="flex items-center gap-3">
+          {isVendor && selectedShippable.length > 0 ? (
+            <Button onClick={() => setShowShipDialog(true)}>
+              <Truck size={14} /> 发货 ({selectedShippable.length})
+            </Button>
+          ) : null}
+          <div className="text-sm text-slate-500">
+            共 <span className="font-semibold text-slate-700">{data?.total ?? '—'}</span> 台
+          </div>
         </div>
       </div>
 
@@ -112,6 +156,7 @@ export default function DevicesPage() {
               setStatus('');
               setModelId('');
               setPage(1);
+              setSelected(new Set());
             }}
           >
             重置
@@ -130,6 +175,19 @@ export default function DevicesPage() {
           <Table>
             <THead>
               <Tr>
+                {isVendor ? (
+                  <Th className="w-8">
+                    <input
+                      type="checkbox"
+                      checked={
+                        selectableIds.length > 0 &&
+                        selected.size === selectableIds.length
+                      }
+                      onChange={toggleAll}
+                      title="选中本页所有可发货设备"
+                    />
+                  </Th>
+                ) : null}
                 <Th>锁号</Th>
                 <Th>BLE MAC</Th>
                 <Th>IMEI</Th>
@@ -141,37 +199,51 @@ export default function DevicesPage() {
               </Tr>
             </THead>
             <TBody>
-              {data.items.map((d) => (
-                <Tr key={d.id}>
-                  <Td>
-                    <Link href={`/devices/${d.id}`} className="font-mono text-sky-600 hover:underline">
-                      {d.lockId}
-                    </Link>
-                  </Td>
-                  <Td className="font-mono text-xs">{d.bleMac}</Td>
-                  <Td className="font-mono text-xs">{d.imei ?? '—'}</Td>
-                  <Td>
-                    {d.model ? (
-                      <span>
-                        {d.model.code}
-                        <span className="ml-1 text-slate-400">{d.model.name}</span>
-                      </span>
-                    ) : (
-                      '—'
-                    )}
-                  </Td>
-                  <Td>
-                    <Badge tone={deviceStatusTone(d.status)}>
-                      {deviceStatusLabel[d.status] ?? d.status}
-                    </Badge>
-                  </Td>
-                  <Td>{d.ownerCompanyName ?? (d.ownerType === 'vendor' ? '厂商' : '—')}</Td>
-                  <Td>{d.lastBattery !== null ? `${d.lastBattery}%` : '—'}</Td>
-                  <Td className="text-xs text-slate-500">
-                    {d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString('zh-CN') : '—'}
-                  </Td>
-                </Tr>
-              ))}
+              {data.items.map((d) => {
+                const canSelect = d.status === 'in_warehouse';
+                return (
+                  <Tr key={d.id}>
+                    {isVendor ? (
+                      <Td>
+                        <input
+                          type="checkbox"
+                          disabled={!canSelect}
+                          checked={selected.has(d.id)}
+                          onChange={() => toggleOne(d.id)}
+                          title={canSelect ? undefined : '仅"已入库"状态可发货'}
+                        />
+                      </Td>
+                    ) : null}
+                    <Td>
+                      <Link href={`/devices/${d.id}`} className="font-mono text-sky-600 hover:underline">
+                        {d.lockId}
+                      </Link>
+                    </Td>
+                    <Td className="font-mono text-xs">{d.bleMac}</Td>
+                    <Td className="font-mono text-xs">{d.imei ?? '—'}</Td>
+                    <Td>
+                      {d.model ? (
+                        <span>
+                          {d.model.code}
+                          <span className="ml-1 text-slate-400">{d.model.name}</span>
+                        </span>
+                      ) : (
+                        '—'
+                      )}
+                    </Td>
+                    <Td>
+                      <Badge tone={deviceStatusTone(d.status)}>
+                        {deviceStatusLabel[d.status] ?? d.status}
+                      </Badge>
+                    </Td>
+                    <Td>{d.ownerCompanyName ?? (d.ownerType === 'vendor' ? '厂商' : '—')}</Td>
+                    <Td>{d.lastBattery !== null ? `${d.lastBattery}%` : '—'}</Td>
+                    <Td className="text-xs text-slate-500">
+                      {d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString('zh-CN') : '—'}
+                    </Td>
+                  </Tr>
+                );
+              })}
             </TBody>
           </Table>
         )}
@@ -200,6 +272,17 @@ export default function DevicesPage() {
           </div>
         ) : null}
       </Card>
+
+      {showShipDialog ? (
+        <ShipDialog
+          selectedDeviceIds={selectedShippable}
+          onClose={() => setShowShipDialog(false)}
+          onShipped={() => {
+            setShowShipDialog(false);
+            setSelected(new Set());
+          }}
+        />
+      ) : null}
     </div>
   );
 }

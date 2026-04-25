@@ -157,3 +157,45 @@ export const DeliverSchema = z.object({
   deviceIds: z.array(z.coerce.number().int().positive()).min(1).max(1000),
 });
 export type DeliverInput = z.infer<typeof DeliverSchema>;
+
+// -------------------- Phase 1.5: org management --------------------
+
+export const CreateDepartmentSchema = z.object({
+  companyId: z.coerce.number().int().positive(),
+  parentId: z.coerce.number().int().positive().optional(),
+  name: z.string().min(1).max(128),
+  code: z.string().max(32).optional(),
+});
+export type CreateDepartmentInput = z.infer<typeof CreateDepartmentSchema>;
+
+export const CreateTeamSchema = z.object({
+  departmentId: z.coerce.number().int().positive(),
+  name: z.string().min(1).max(128),
+  leaderUserId: z.coerce.number().int().positive().optional(),
+});
+export type CreateTeamInput = z.infer<typeof CreateTeamSchema>;
+
+export const CreateUserSchema = z.object({
+  companyId: z.coerce.number().int().positive().optional(),
+  phone: z.string().regex(phoneRegex),
+  name: z.string().min(1).max(64),
+  employeeNo: z.string().max(32).optional(),
+  email: z.string().email().max(128).optional(),
+  role: z.enum([
+    'vendor_admin',
+    'company_admin',
+    'dept_admin',
+    'team_leader',
+    'member',
+    'production_operator',
+  ]),
+  initialPassword: z.string().min(6).max(64).optional(),
+  teamId: z.coerce.number().int().positive().optional(),
+});
+export type CreateUserInput = z.infer<typeof CreateUserSchema>;
+
+export const AddTeamMemberSchema = z.object({
+  userId: z.coerce.number().int().positive(),
+  roleInTeam: z.enum(['leader', 'member']).default('member'),
+});
+export type AddTeamMemberInput = z.infer<typeof AddTeamMemberSchema>;

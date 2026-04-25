@@ -1,0 +1,198 @@
+import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
+import { z } from 'zod';
+import bcrypt from 'bcryptjs';
+import { prisma } from '@abd/db';
+import {
+  AddTeamMemberSchema,
+  ApiError,
+  CreateUserSchema,
+  PaginationSchema,
+} from '@abd/shared';
+import { getAuthContext, requireRole, scopeToCompany } from '../lib/auth.js';
+
+export default async function userRoutes(app: FastifyInstance) {
+  const typed = app.withTypeProvider<ZodTypeProvider>();
+
+  typed.get(
+    '/users',
+    {
+      onRequest: [app.authenticate, requireRole('vendor_admin', 'company_admin', 'dept_admin')],
+      schema: {
+        querystring: PaginationSchema.extend({
+          companyId: z.coerce.number().int().positive().optional(),
+        }),
+      },
+    },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const { page, pageSize, companyId } = req.query;
+      const scope = scopeToCompany(ctx);
+
+      const where = scope.companyId
+        ? { companyId: scope.companyId, deletedAt: null }
+        : companyId
+          ? { companyId: BigInt(companyId), deletedAt: null }
+          : { deletedAt: null };
+
+      const [items, total] = await Promise.all([
+        prisma.user.findMany({
+          where,
+          orderBy: { id: 'desc' },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          include: { company: true, memberships: { include: { team: true } } },
+        }),
+        prisma.user.count({ where }),
+      ]);
+
+      return {
+        items: items.map((u) => ({
+          id: u.id.toString(),
+          name: u.name,
+          phone: u.phone,
+          email: u.email,
+          employeeNo: u.employeeNo,
+          role: u.role,
+          status: u.status,
+          companyId: u.companyId?.toString() ?? null,
+          companyName: u.company?.name ?? null,
+          teams: u.memberships.map((m) => ({
+            id: m.teamId.toString(),
+            name: m.team.name,
+            roleInTeam: m.roleInTeam,
+          })),
+          lastLoginAt: u.lastLoginAt?.toISOString() ?? null,
+          createdAt: u.createdAt.toISOString(),
+        })),
+        total,
+        page,
+        pageSize,
+      };
+    },
+  );
+
+  typed.post(
+    '/users',
+    {
+      onRequest: [app.authenticate, requireRole('vendor_admin', 'company_admin')],
+      schema: { body: CreateUserSchema },
+    },
+    async (req, reply) => {
+      const ctx = getAuthContext(req);
+      const {
+        companyId,
+        phone,
+        name,
+        employeeNo,
+        email,
+        role,
+        initialPassword,
+        teamId,
+      } = req.body;
+
+      // company_admin can only create users in their own company, never vendor_admin
+      if (ctx.role === 'company_admin') {
+        if (role === 'vendor_admin') throw ApiError.forbidden('Cannot create vendor admin');
+        if (companyId && BigInt(companyId) !== ctx.companyId) throw ApiError.forbidden();
+      }
+
+      const targetCompanyId =
+        ctx.role === 'company_admin' ? ctx.companyId : companyId ? BigInt(companyId) : null;
+
+      // vendor_admin role must NOT be tied to a company (they belong to the platform)
+      if (role === 'vendor_admin' && targetCompanyId) {
+        throw ApiError.conflict('vendor_admin cannot be tied to a company');
+      }
+      if (role !== 'vendor_admin' && !targetCompanyId) {
+        throw ApiError.conflict('Non-vendor users must belong to a company');
+      }
+
+      const dup = await prisma.user.findUnique({ where: { phone } });
+      if (dup) throw ApiError.conflict(`Phone ${phone} already registered`);
+
+      let teamCompanyId: bigint | null = null;
+      if (teamId) {
+        const team = await prisma.team.findUnique({ where: { id: BigInt(teamId) } });
+        if (!team) throw ApiError.notFound('Team not found');
+        teamCompanyId = team.companyId;
+        if (targetCompanyId && team.companyId !== targetCompanyId) {
+          throw ApiError.conflict('Team belongs to a different company');
+        }
+      }
+
+      const user = await prisma.$transaction(async (tx) => {
+        const u = await tx.user.create({
+          data: {
+            companyId: targetCompanyId,
+            phone,
+            name,
+            employeeNo,
+            email,
+            role,
+            passwordHash: initialPassword ? await bcrypt.hash(initialPassword, 12) : null,
+            status: initialPassword ? 'active' : 'invited',
+          },
+        });
+        if (teamId) {
+          await tx.userMembership.create({
+            data: {
+              userId: u.id,
+              teamId: BigInt(teamId),
+              roleInTeam: role === 'team_leader' ? 'leader' : 'member',
+            },
+          });
+        }
+        return u;
+      });
+      void teamCompanyId;
+
+      reply.code(201);
+      return {
+        id: user.id.toString(),
+        name: user.name,
+        phone: user.phone,
+        role: user.role,
+        status: user.status,
+      };
+    },
+  );
+
+  typed.post(
+    '/teams/:id/members',
+    {
+      onRequest: [app.authenticate, requireRole('vendor_admin', 'company_admin', 'dept_admin', 'team_leader')],
+      schema: {
+        params: z.object({ id: z.coerce.number().int().positive() }),
+        body: AddTeamMemberSchema,
+      },
+    },
+    async (req, reply) => {
+      const ctx = getAuthContext(req);
+      const teamId = BigInt(req.params.id);
+      const { userId, roleInTeam } = req.body;
+
+      const team = await prisma.team.findUnique({ where: { id: teamId } });
+      if (!team) throw ApiError.notFound('Team not found');
+      const scope = scopeToCompany(ctx);
+      if (scope.companyId && scope.companyId !== team.companyId) throw ApiError.forbidden();
+
+      const user = await prisma.user.findUnique({ where: { id: BigInt(userId) } });
+      if (!user) throw ApiError.notFound('User not found');
+      if (user.companyId !== team.companyId) {
+        throw ApiError.conflict('User belongs to a different company');
+      }
+
+      const dup = await prisma.userMembership.findUnique({
+        where: { userId_teamId: { userId: BigInt(userId), teamId } },
+      });
+      if (dup) throw ApiError.conflict('User already in team');
+
+      await prisma.userMembership.create({
+        data: { userId: BigInt(userId), teamId, roleInTeam },
+      });
+      reply.code(201);
+      return { teamId: teamId.toString(), userId: userId.toString() };
+    },
+  );
+}

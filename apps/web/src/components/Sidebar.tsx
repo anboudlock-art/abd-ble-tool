@@ -2,15 +2,15 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Boxes, Layers, Lock, LogOut, Package } from 'lucide-react';
+import { Boxes, Building2, Lock, LogOut, UsersRound } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useAuth } from '@/providers/AuthProvider';
 
 const items = [
   { href: '/devices', label: '设备', icon: Lock },
   { href: '/batches', label: '生产批次', icon: Boxes },
-  { href: '/models', label: '设备型号', icon: Layers },
-  { href: '/companies', label: '客户公司', icon: Package },
+  { href: '/companies', label: '客户公司', icon: Building2 },
+  { href: '/users', label: '人员', icon: UsersRound },
 ];
 
 export function Sidebar() {

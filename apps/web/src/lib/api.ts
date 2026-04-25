@@ -209,3 +209,69 @@ export interface DeviceTransfer {
   metadata: unknown;
   createdAt: string;
 }
+
+export interface CompanySummary {
+  id: string;
+  name: string;
+  shortCode: string | null;
+  industry: string;
+  contactName: string | null;
+  contactPhone: string | null;
+  status: string;
+  plan: string;
+  maxDevices: number | null;
+  deviceCount: number;
+  departmentCount: number;
+  userCount: number;
+  createdAt: string;
+}
+
+export interface CompanyDetail extends Omit<CompanySummary, 'departmentCount' | 'createdAt'> {
+  departments: Array<{
+    id: string;
+    name: string;
+    code: string | null;
+    parentId: string | null;
+    teams: Array<{
+      id: string;
+      name: string;
+      leaderUserId: string | null;
+      memberCount: number;
+    }>;
+  }>;
+}
+
+export interface CompanyListResp {
+  items: CompanySummary[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface UserSummary {
+  id: string;
+  name: string;
+  phone: string;
+  email: string | null;
+  employeeNo: string | null;
+  role: string;
+  status: string;
+  companyId: string | null;
+  companyName: string | null;
+  teams: Array<{ id: string; name: string; roleInTeam: string }>;
+  lastLoginAt: string | null;
+  createdAt: string;
+}
+
+export interface UserListResp {
+  items: UserSummary[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface ShipResponse {
+  shippedCount: number;
+  toCompanyId: string;
+  devices: Array<{ id: string; lockId: string; status: string }>;
+}

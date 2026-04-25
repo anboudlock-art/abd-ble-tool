@@ -15,6 +15,9 @@ import productionBatchRoutes from './routes/production-batches.js';
 import productionScanRoutes from './routes/production-scans.js';
 import deviceRoutes from './routes/devices.js';
 import deviceTransferRoutes from './routes/device-transfers.js';
+import companyRoutes from './routes/companies.js';
+import departmentRoutes from './routes/departments.js';
+import userRoutes from './routes/users.js';
 
 export async function buildApp() {
   const config = loadConfig();
@@ -53,6 +56,9 @@ export async function buildApp() {
   await app.register(productionScanRoutes, { prefix: '/api/v1' });
   await app.register(deviceRoutes, { prefix: '/api/v1' });
   await app.register(deviceTransferRoutes, { prefix: '/api/v1' });
+  await app.register(companyRoutes, { prefix: '/api/v1' });
+  await app.register(departmentRoutes, { prefix: '/api/v1' });
+  await app.register(userRoutes, { prefix: '/api/v1' });
 
   return app;
 }
