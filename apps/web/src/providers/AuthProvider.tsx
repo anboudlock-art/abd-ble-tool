@@ -1,0 +1,85 @@
+'use client';
+
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
+import { useRouter } from 'next/navigation';
+import { apiRequest, tokenStorage, type User } from '@/lib/api';
+
+interface AuthState {
+  user: User | null;
+  loading: boolean;
+  login: (phone: string, password: string) => Promise<void>;
+  logout: () => void;
+  refresh: () => Promise<void>;
+}
+
+const AuthContext = createContext<AuthState | undefined>(undefined);
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+
+  const refresh = useCallback(async () => {
+    if (!tokenStorage.get()) {
+      setUser(null);
+      setLoading(false);
+      return;
+    }
+    try {
+      const me = await apiRequest<User>('/api/v1/auth/me');
+      setUser(me);
+    } catch {
+      tokenStorage.clear();
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const login = useCallback(
+    async (phone: string, password: string) => {
+      const resp = await apiRequest<{
+        accessToken: string;
+        user: User;
+      }>('/api/v1/auth/login', {
+        method: 'POST',
+        body: { phone, password },
+      });
+      tokenStorage.set(resp.accessToken);
+      setUser({ ...resp.user, phone });
+      router.push('/devices');
+    },
+    [router],
+  );
+
+  const logout = useCallback(() => {
+    tokenStorage.clear();
+    setUser(null);
+    router.push('/login');
+  }, [router]);
+
+  const value = useMemo(
+    () => ({ user, loading, login, logout, refresh }),
+    [user, loading, login, logout, refresh],
+  );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+export function useAuth(): AuthState {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
+  return ctx;
+}
