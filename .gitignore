@@ -43,3 +43,12 @@ abd-ble-tool.tar/abd-ble-tool/.gradle/
 abd-ble-tool.tar/abd-ble-tool/build/
 abd-ble-tool.tar/abd-ble-tool/app/build/
 abd-ble-tool.tar/abd-ble-tool/local.properties
+
+# Android
+mobile/android-prod/.gradle/
+mobile/android-prod/build/
+mobile/android-prod/app/build/
+mobile/android-prod/local.properties
+mobile/android-prod/captures/
+mobile/android-prod/.idea/
+*.iml
