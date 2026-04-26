@@ -283,6 +283,40 @@ export interface AssignResponse {
   devices: Array<{ id: string; lockId: string; status: string }>;
 }
 
+export interface IntegrationApp {
+  id: string;
+  name: string;
+  appKey: string;
+  scopes: string[];
+  status: string;
+  ipWhitelist: string[] | null;
+  webhookCount: number;
+  createdAt: string;
+}
+
+export interface IntegrationAppCreated {
+  id: string;
+  name: string;
+  appKey: string;
+  appSecret: string;
+  scopes: string[];
+}
+
+export interface WebhookSubscription {
+  id: string;
+  url: string;
+  eventTypes: string[];
+  active: boolean;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  failureCount: number;
+}
+
+export interface WebhookSubscriptionCreated extends WebhookSubscription {
+  secret: string;
+  createdAt: string;
+}
+
 export interface DeviceCommand {
   id: string;
   commandType: string;

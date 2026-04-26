@@ -210,3 +210,40 @@ export const DeviceCommandRequestSchema = z.object({
   commandType: z.enum(['unlock', 'lock', 'query_status']),
 });
 export type DeviceCommandRequestInput = z.infer<typeof DeviceCommandRequestSchema>;
+
+// -------------------- Phase 5: integration / webhooks --------------------
+
+export const integrationScopes = [
+  'device:read',
+  'device:command',
+  'event:read',
+  'event:webhook',
+] as const;
+export type IntegrationScope = (typeof integrationScopes)[number];
+
+export const CreateIntegrationAppSchema = z.object({
+  name: z.string().min(1).max(128),
+  scopes: z.array(z.enum(integrationScopes)).min(1),
+  ipWhitelist: z.array(z.string().min(1)).max(32).optional(),
+});
+export type CreateIntegrationAppInput = z.infer<typeof CreateIntegrationAppSchema>;
+
+export const webhookEventTypes = [
+  'lock.opened',
+  'lock.closed',
+  'lock.tampered',
+  'lock.low_battery',
+  'lock.offline',
+  'lock.online',
+  'device.delivered',
+  'device.assigned',
+  'command.acked',
+  'command.timeout',
+] as const;
+export type WebhookEventType = (typeof webhookEventTypes)[number];
+
+export const CreateWebhookSubscriptionSchema = z.object({
+  url: z.string().url().max(512),
+  eventTypes: z.array(z.enum(webhookEventTypes)).min(1),
+});
+export type CreateWebhookSubscriptionInput = z.infer<typeof CreateWebhookSubscriptionSchema>;

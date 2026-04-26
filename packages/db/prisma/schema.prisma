@@ -504,7 +504,7 @@ model DeviceCommand {
   id              BigInt                @id @default(autoincrement())
   deviceId        BigInt                @map("device_id")
   commandType     DeviceCommandType     @map("command_type")
-  issuedByUserId  BigInt                @map("issued_by_user_id")
+  issuedByUserId  BigInt?               @map("issued_by_user_id")
   source          DeviceCommandSource
   gatewayId       BigInt?               @map("gateway_id")
   requestPayload  Bytes?                @map("request_payload")
@@ -518,7 +518,7 @@ model DeviceCommand {
   createdAt       DateTime              @default(now()) @map("created_at")
 
   device          Device                @relation(fields: [deviceId], references: [id])
-  issuedBy        User                  @relation("CommandIssuer", fields: [issuedByUserId], references: [id])
+  issuedBy        User?                 @relation("CommandIssuer", fields: [issuedByUserId], references: [id])
   gateway         Gateway?              @relation(fields: [gatewayId], references: [id])
   resultEvent     LockEvent?            @relation("CommandResult", fields: [resultEventId], references: [id])
 
@@ -567,7 +567,7 @@ model IntegrationApp {
   ulid            String               @unique @default(cuid())
   companyId       BigInt               @map("company_id")
   name            String               @db.VarChar(128)
-  appKey          String               @unique @map("app_key") @db.VarChar(32)
+  appKey          String               @unique @map("app_key") @db.VarChar(64)
   appSecretHash   String               @map("app_secret_hash") @db.VarChar(255)
   scopes          Json
   ipWhitelist     Json?                @map("ip_whitelist")

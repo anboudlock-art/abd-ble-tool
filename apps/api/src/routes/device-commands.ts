@@ -156,7 +156,7 @@ export default async function deviceCommandRoutes(app: FastifyInstance) {
           status: c.status,
           source: c.source,
           retries: c.retries,
-          issuedByUserId: c.issuedByUserId.toString(),
+          issuedByUserId: c.issuedByUserId?.toString() ?? null,
           sentAt: c.sentAt?.toISOString() ?? null,
           ackedAt: c.ackedAt?.toISOString() ?? null,
           timeoutAt: c.timeoutAt?.toISOString() ?? null,
