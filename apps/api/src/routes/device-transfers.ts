@@ -2,7 +2,12 @@ import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { prisma } from '@abd/db';
-import { ApiError, ShipToCompanySchema, DeliverSchema } from '@abd/shared';
+import {
+  ApiError,
+  AssignDevicesSchema,
+  DeliverSchema,
+  ShipToCompanySchema,
+} from '@abd/shared';
 import { getAuthContext, requireRole } from '../lib/auth.js';
 import { assertTransition } from '../domain/device-state-machine.js';
 
@@ -122,6 +127,108 @@ export default async function deviceTransferRoutes(app: FastifyInstance) {
       return {
         deliveredCount: delivered.length,
         devices: delivered.map((d) => ({ id: d.id.toString(), lockId: d.lockId, status: d.status })),
+      };
+    },
+  );
+
+  /**
+   * Company admin / dept admin assigns devices to a team.
+   * Transitions: delivered → assigned (or already-assigned → reassigned).
+   */
+  typed.post(
+    '/devices/assign',
+    {
+      onRequest: [
+        app.authenticate,
+        requireRole('vendor_admin', 'company_admin', 'dept_admin'),
+      ],
+      schema: { body: AssignDevicesSchema },
+    },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const { deviceIds, teamId } = req.body;
+      const ids = deviceIds.map(BigInt);
+
+      const team = await prisma.team.findUnique({
+        where: { id: BigInt(teamId) },
+        include: { department: true },
+      });
+      if (!team) throw ApiError.notFound(`Team ${teamId} not found`);
+      if (ctx.role !== 'vendor_admin' && team.companyId !== ctx.companyId) {
+        throw ApiError.forbidden();
+      }
+
+      const devices = await prisma.device.findMany({ where: { id: { in: ids } } });
+      if (devices.length !== ids.length) throw ApiError.notFound('Some devices not found');
+
+      for (const d of devices) {
+        if (ctx.role !== 'vendor_admin' && d.ownerCompanyId !== ctx.companyId) {
+          throw ApiError.forbidden(`Device ${d.lockId} belongs to another company`);
+        }
+        if (d.ownerCompanyId !== team.companyId) {
+          throw ApiError.conflict(
+            `Device ${d.lockId} not in target team's company`,
+          );
+        }
+        // Allow re-assignment from `assigned` or `active` back to `assigned`
+        if (
+          d.status !== 'delivered' &&
+          d.status !== 'assigned' &&
+          d.status !== 'active'
+        ) {
+          throw ApiError.conflict(
+            `Device ${d.lockId} is in status '${d.status}'; cannot assign`,
+          );
+        }
+      }
+
+      const updated = await prisma.$transaction(async (tx) => {
+        const out = [];
+        for (const d of devices) {
+          const newStatus = d.status === 'active' ? 'active' : 'assigned';
+          if (d.status !== newStatus) assertTransition(d.status, newStatus);
+          const u = await tx.device.update({
+            where: { id: d.id },
+            data: { status: newStatus, currentTeamId: team.id },
+          });
+          await tx.deviceTransfer.create({
+            data: {
+              deviceId: d.id,
+              fromStatus: d.status,
+              toStatus: newStatus,
+              fromOwnerType: d.ownerType,
+              fromOwnerId: d.currentTeamId,
+              toOwnerType: 'company',
+              toOwnerId: team.id,
+              operatorUserId: ctx.userId,
+              reason: d.status === newStatus ? 'reassign' : 'assign',
+              metadata: { teamId: team.id.toString(), teamName: team.name },
+            },
+          });
+          // Default-grant the team scope so members can open it
+          await tx.deviceAssignment.create({
+            data: {
+              deviceId: d.id,
+              companyId: team.companyId,
+              scope: 'team',
+              teamId: team.id,
+              grantedByUserId: ctx.userId,
+            },
+          });
+          out.push(u);
+        }
+        return out;
+      });
+
+      return {
+        assignedCount: updated.length,
+        teamId: team.id.toString(),
+        teamName: team.name,
+        devices: updated.map((d) => ({
+          id: d.id.toString(),
+          lockId: d.lockId,
+          status: d.status,
+        })),
       };
     },
   );

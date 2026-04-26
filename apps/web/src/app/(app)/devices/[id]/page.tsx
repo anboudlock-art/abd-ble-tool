@@ -12,6 +12,7 @@ import {
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Table, THead, TBody, Tr, Th, Td, EmptyState } from '@/components/ui/Table';
 import { Badge, deviceStatusLabel, deviceStatusTone } from '@/components/ui/Badge';
+import { RemoteControl } from '@/components/RemoteControl';
 
 export default function DeviceDetailPage({
   params,
@@ -91,6 +92,8 @@ export default function DeviceDetailPage({
           </dl>
         </CardBody>
       </Card>
+
+      <RemoteControl device={d} />
 
       <Card>
         <CardHeader title="流转历史" description="设备生命周期的每一次状态变更" />

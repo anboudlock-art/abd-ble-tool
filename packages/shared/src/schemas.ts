@@ -199,3 +199,14 @@ export const AddTeamMemberSchema = z.object({
   roleInTeam: z.enum(['leader', 'member']).default('member'),
 });
 export type AddTeamMemberInput = z.infer<typeof AddTeamMemberSchema>;
+
+export const AssignDevicesSchema = z.object({
+  deviceIds: z.array(z.coerce.number().int().positive()).min(1).max(1000),
+  teamId: z.coerce.number().int().positive(),
+});
+export type AssignDevicesInput = z.infer<typeof AssignDevicesSchema>;
+
+export const DeviceCommandRequestSchema = z.object({
+  commandType: z.enum(['unlock', 'lock', 'query_status']),
+});
+export type DeviceCommandRequestInput = z.infer<typeof DeviceCommandRequestSchema>;

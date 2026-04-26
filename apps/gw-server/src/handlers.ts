@@ -112,6 +112,28 @@ export async function handleLoraUplink(s: GatewaySession, payload: Buffer): Prom
     },
   });
 
+  // Resolve any pending command for this device whose intent matches the
+  // observed state. We pick the oldest pending one within its timeout.
+  const matchingCmdType =
+    eventType === 'opened' ? 'unlock' : eventType === 'closed' ? 'lock' : null;
+  if (matchingCmdType) {
+    const pending = await prisma.deviceCommand.findFirst({
+      where: {
+        deviceId: device.id,
+        commandType: matchingCmdType,
+        status: { in: ['pending', 'sent'] },
+        timeoutAt: { gt: now },
+      },
+      orderBy: { id: 'asc' },
+    });
+    if (pending) {
+      await prisma.deviceCommand.update({
+        where: { id: pending.id },
+        data: { status: 'acked', ackedAt: now, resultEventId: event.id },
+      });
+    }
+  }
+
   await publishLockEvent({ eventId: event.id.toString(), deviceId: device.id.toString() });
 }
 

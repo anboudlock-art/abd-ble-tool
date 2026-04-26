@@ -18,6 +18,7 @@ import deviceTransferRoutes from './routes/device-transfers.js';
 import companyRoutes from './routes/companies.js';
 import departmentRoutes from './routes/departments.js';
 import userRoutes from './routes/users.js';
+import deviceCommandRoutes from './routes/device-commands.js';
 
 export async function buildApp() {
   const config = loadConfig();
@@ -59,6 +60,7 @@ export async function buildApp() {
   await app.register(companyRoutes, { prefix: '/api/v1' });
   await app.register(departmentRoutes, { prefix: '/api/v1' });
   await app.register(userRoutes, { prefix: '/api/v1' });
+  await app.register(deviceCommandRoutes, { prefix: '/api/v1' });
 
   return app;
 }

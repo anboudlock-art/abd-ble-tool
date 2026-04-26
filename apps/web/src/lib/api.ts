@@ -275,3 +275,25 @@ export interface ShipResponse {
   toCompanyId: string;
   devices: Array<{ id: string; lockId: string; status: string }>;
 }
+
+export interface AssignResponse {
+  assignedCount: number;
+  teamId: string;
+  teamName: string;
+  devices: Array<{ id: string; lockId: string; status: string }>;
+}
+
+export interface DeviceCommand {
+  id: string;
+  commandType: string;
+  status: 'pending' | 'sent' | 'acked' | 'timeout' | 'failed';
+  source: string;
+  retries: number;
+  issuedByUserId: string;
+  sentAt: string | null;
+  ackedAt: string | null;
+  timeoutAt: string | null;
+  resultEventId: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+}

@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Search, Truck } from 'lucide-react';
+import { Search, Truck, UsersRound } from 'lucide-react';
 import { apiRequest, type DeviceListResp, type DeviceModel } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
 import { Table, THead, TBody, Tr, Th, Td, EmptyState } from '@/components/ui/Table';
@@ -11,6 +11,7 @@ import { Badge, deviceStatusLabel, deviceStatusTone } from '@/components/ui/Badg
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { ShipDialog } from '@/components/ShipDialog';
+import { AssignDialog } from '@/components/AssignDialog';
 import { useAuth } from '@/providers/AuthProvider';
 
 const STATUS_OPTIONS = [
@@ -33,9 +34,14 @@ export default function DevicesPage() {
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showShipDialog, setShowShipDialog] = useState(false);
+  const [showAssignDialog, setShowAssignDialog] = useState(false);
   const pageSize = 20;
 
   const isVendor = user?.role === 'vendor_admin';
+  const canAssign =
+    user?.role === 'vendor_admin' ||
+    user?.role === 'company_admin' ||
+    user?.role === 'dept_admin';
 
   const modelsQ = useQuery({
     queryKey: ['device-models'],
@@ -59,19 +65,33 @@ export default function DevicesPage() {
   const data = devicesQ.data;
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
 
-  // Only in_warehouse devices may be shipped
-  const selectableIds = useMemo(
-    () =>
-      (data?.items ?? [])
-        .filter((d) => d.status === 'in_warehouse')
-        .map((d) => d.id),
-    [data],
-  );
+  // Selection rules differ by role:
+  //   vendor_admin: in_warehouse devices (for shipping)
+  //   company_admin / dept_admin: delivered devices (for assigning)
+  const selectableIds = useMemo(() => {
+    const items = data?.items ?? [];
+    if (isVendor) return items.filter((d) => d.status === 'in_warehouse').map((d) => d.id);
+    if (canAssign)
+      return items.filter((d) => d.status === 'delivered' || d.status === 'assigned').map((d) => d.id);
+    return [];
+  }, [data, isVendor, canAssign]);
 
   const selectedShippable = useMemo(
     () =>
-      Array.from(selected).filter((id) => selectableIds.includes(id)),
-    [selected, selectableIds],
+      Array.from(selected).filter((id) =>
+        (data?.items ?? []).some((d) => d.id === id && d.status === 'in_warehouse'),
+      ),
+    [selected, data],
+  );
+
+  const selectedAssignable = useMemo(
+    () =>
+      Array.from(selected).filter((id) =>
+        (data?.items ?? []).some(
+          (d) => d.id === id && (d.status === 'delivered' || d.status === 'assigned'),
+        ),
+      ),
+    [selected, data],
   );
 
   const toggleAll = () => {
@@ -97,6 +117,11 @@ export default function DevicesPage() {
           {isVendor && selectedShippable.length > 0 ? (
             <Button onClick={() => setShowShipDialog(true)}>
               <Truck size={14} /> 发货 ({selectedShippable.length})
+            </Button>
+          ) : null}
+          {canAssign && selectedAssignable.length > 0 ? (
+            <Button variant="secondary" onClick={() => setShowAssignDialog(true)}>
+              <UsersRound size={14} /> 分配到班组 ({selectedAssignable.length})
             </Button>
           ) : null}
           <div className="text-sm text-slate-500">
@@ -175,7 +200,7 @@ export default function DevicesPage() {
           <Table>
             <THead>
               <Tr>
-                {isVendor ? (
+                {isVendor || canAssign ? (
                   <Th className="w-8">
                     <input
                       type="checkbox"
@@ -184,7 +209,7 @@ export default function DevicesPage() {
                         selected.size === selectableIds.length
                       }
                       onChange={toggleAll}
-                      title="选中本页所有可发货设备"
+                      title="选中本页所有可操作设备"
                     />
                   </Th>
                 ) : null}
@@ -200,17 +225,23 @@ export default function DevicesPage() {
             </THead>
             <TBody>
               {data.items.map((d) => {
-                const canSelect = d.status === 'in_warehouse';
+                const canSelect = selectableIds.includes(d.id);
                 return (
                   <Tr key={d.id}>
-                    {isVendor ? (
+                    {isVendor || canAssign ? (
                       <Td>
                         <input
                           type="checkbox"
                           disabled={!canSelect}
                           checked={selected.has(d.id)}
                           onChange={() => toggleOne(d.id)}
-                          title={canSelect ? undefined : '仅"已入库"状态可发货'}
+                          title={
+                            canSelect
+                              ? undefined
+                              : isVendor
+                                ? '仅"已入库"状态可发货'
+                                : '仅"已签收/已分配"状态可分配'
+                          }
                         />
                       </Td>
                     ) : null}
@@ -279,6 +310,17 @@ export default function DevicesPage() {
           onClose={() => setShowShipDialog(false)}
           onShipped={() => {
             setShowShipDialog(false);
+            setSelected(new Set());
+          }}
+        />
+      ) : null}
+
+      {showAssignDialog ? (
+        <AssignDialog
+          selectedDeviceIds={selectedAssignable}
+          onClose={() => setShowAssignDialog(false)}
+          onAssigned={() => {
+            setShowAssignDialog(false);
             setSelected(new Set());
           }}
         />
