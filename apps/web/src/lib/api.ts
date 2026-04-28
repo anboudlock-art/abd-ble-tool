@@ -56,14 +56,24 @@ export async function apiRequest<T = unknown>(
   const token = tokenStorage.get();
   if (token) headers.set('Authorization', `Bearer ${token}`);
 
-  const url = new URL(path.startsWith('http') ? path : baseUrl + path);
+  let url: string;
+  if (path.startsWith('http')) {
+    url = path;
+  } else if (!baseUrl) {
+    // 空 baseUrl → 相对路径，直接用（Nginx 反代模式）
+    url = path;
+  } else {
+    url = new URL(baseUrl + path).toString();
+  }
   if (init.query) {
+    const u = new URL(url, 'http://localhost');
     for (const [k, v] of Object.entries(init.query)) {
-      if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
+      if (v !== undefined && v !== null && v !== '') u.searchParams.set(k, String(v));
     }
+    url = u.pathname + u.search;
   }
 
-  const res = await fetch(url.toString(), {
+  const res = await fetch(url, {
     method: init.method ?? 'GET',
     headers,
     credentials: 'omit',
