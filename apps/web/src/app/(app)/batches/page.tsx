@@ -2,14 +2,15 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Plus } from 'lucide-react';
-import { apiRequest, type BatchListResp } from '@/lib/api';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Plus, Trash2 } from 'lucide-react';
+import { apiRequest, ApiClientError, type BatchListResp } from '@/lib/api';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { Table, THead, TBody, Tr, Th, Td, EmptyState } from '@/components/ui/Table';
 import { Button } from '@/components/ui/Button';
 
 export default function BatchesPage() {
+  const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const pageSize = 20;
 
@@ -19,6 +20,13 @@ export default function BatchesPage() {
       apiRequest<BatchListResp>('/api/v1/production/batches', {
         query: { page, pageSize },
       }),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) =>
+      apiRequest(`/api/v1/production/batches/${id}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['batches'] }),
+    onError: (e) => alert(e instanceof ApiClientError ? e.body.message : '删除失败'),
   });
 
   const data = q.data;
@@ -55,6 +63,7 @@ export default function BatchesPage() {
                 <Th>已采集</Th>
                 <Th>进度</Th>
                 <Th>创建时间</Th>
+                <Th></Th>
               </Tr>
             </THead>
             <TBody>
@@ -94,6 +103,23 @@ export default function BatchesPage() {
                     </Td>
                     <Td className="text-xs text-slate-500">
                       {new Date(b.createdAt).toLocaleString('zh-CN')}
+                    </Td>
+                    <Td>
+                      <button
+                        onClick={() => {
+                          if (b.producedCount > 0) {
+                            alert('该批次已有设备入库，无法删除');
+                            return;
+                          }
+                          if (confirm(`删除批次 ${b.batchNo}？`)) {
+                            remove.mutate(b.id);
+                          }
+                        }}
+                        className="text-slate-400 hover:text-red-500"
+                        title="删除"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </Td>
                   </Tr>
                 );

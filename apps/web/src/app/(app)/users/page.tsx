@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Copy, KeyRound, Plus, X } from 'lucide-react';
+import { Copy, KeyRound, Plus, Trash2, X } from 'lucide-react';
 import { apiRequest, ApiClientError, type UserListResp } from '@/lib/api';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { Table, THead, TBody, Tr, Th, Td, EmptyState } from '@/components/ui/Table';
@@ -50,6 +50,14 @@ export default function UsersPage() {
     onError: (err) => {
       alert(err instanceof ApiClientError ? err.body.message : '重置失败');
     },
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) =>
+      apiRequest(`/api/v1/users/${id}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+    onError: (err) =>
+      alert(err instanceof ApiClientError ? err.body.message : '删除失败'),
   });
 
   const data = q.data;
@@ -106,18 +114,36 @@ export default function UsersPage() {
                   </Td>
                   {canManage ? (
                     <Td>
-                      <button
-                        title="重置密码"
-                        disabled={reset.isPending && reset.variables === u.id}
-                        onClick={() => {
-                          if (confirm(`重置 ${u.name} 的密码？将生成新的临时密码`)) {
-                            reset.mutate(u.id);
-                          }
-                        }}
-                        className="text-slate-400 hover:text-slate-700 disabled:opacity-30"
-                      >
-                        <KeyRound size={14} />
-                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          title="重置密码"
+                          disabled={reset.isPending && reset.variables === u.id}
+                          onClick={() => {
+                            if (confirm(`重置 ${u.name} 的密码？将生成新的临时密码`)) {
+                              reset.mutate(u.id);
+                            }
+                          }}
+                          className="text-slate-400 hover:text-slate-700 disabled:opacity-30"
+                        >
+                          <KeyRound size={14} />
+                        </button>
+                        <button
+                          title="删除"
+                          disabled={remove.isPending && remove.variables === u.id}
+                          onClick={() => {
+                            if (u.id === me?.id) {
+                              alert('不能删除自己');
+                              return;
+                            }
+                            if (confirm(`删除用户 ${u.name}？`)) {
+                              remove.mutate(u.id);
+                            }
+                          }}
+                          className="text-slate-400 hover:text-red-500 disabled:opacity-30"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </Td>
                   ) : null}
                 </Tr>

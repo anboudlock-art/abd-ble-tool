@@ -2,12 +2,14 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
-import { Beaker, Download, FileUp, Plus, Search, Truck, UsersRound } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Beaker, Download, FileUp, Pencil, Plus, Search, Trash2, Truck, UsersRound } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import {
   apiRequest,
+  ApiClientError,
   downloadFile,
+  type Device,
   type DeviceListResp,
   type DeviceModel,
 } from '@/lib/api';
@@ -21,6 +23,7 @@ import { AssignDialog } from '@/components/AssignDialog';
 import { ManualRegisterDialog } from '@/components/ManualRegisterDialog';
 import { ImportDialog } from '@/components/ImportDialog';
 import { TestDeviceDialog } from '@/components/TestDeviceDialog';
+import { EditDeviceDialog } from '@/components/EditDeviceDialog';
 import { useAuth } from '@/providers/AuthProvider';
 
 const STATUS_OPTIONS = [
@@ -47,9 +50,18 @@ export default function DevicesPage() {
   const [showRegisterDialog, setShowRegisterDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showTestDialog, setShowTestDialog] = useState(false);
+  const [editing, setEditing] = useState<Device | null>(null);
   const [exporting, setExporting] = useState(false);
   const router = useRouter();
+  const qc = useQueryClient();
   const pageSize = 20;
+
+  const remove = useMutation({
+    mutationFn: (id: string) =>
+      apiRequest(`/api/v1/devices/${id}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['devices'] }),
+    onError: (e) => alert(e instanceof ApiClientError ? e.body.message : '删除失败'),
+  });
 
   const isVendor = user?.role === 'vendor_admin';
   const canAssign =
@@ -272,6 +284,7 @@ export default function DevicesPage() {
                 <Th>归属</Th>
                 <Th>电量</Th>
                 <Th>最近上报</Th>
+                {canAssign || isVendor ? <Th></Th> : null}
               </Tr>
             </THead>
             <TBody>
@@ -323,6 +336,36 @@ export default function DevicesPage() {
                     <Td className="text-xs text-slate-500">
                       {d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString('zh-CN') : '—'}
                     </Td>
+                    {canAssign || isVendor ? (
+                      <Td>
+                        <div className="flex gap-2">
+                          <button
+                            title="编辑"
+                            onClick={() => setEditing(d)}
+                            className="text-slate-400 hover:text-slate-700"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          {isVendor ? (
+                            <button
+                              title="删除"
+                              onClick={() => {
+                                if (
+                                  confirm(
+                                    `删除设备 ${d.lockId}？需要状态在 已入库/已回收/已报废`,
+                                  )
+                                ) {
+                                  remove.mutate(d.id);
+                                }
+                              }}
+                              className="text-slate-400 hover:text-red-500"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          ) : null}
+                        </div>
+                      </Td>
+                    ) : null}
                   </Tr>
                 );
               })}
@@ -398,6 +441,14 @@ export default function DevicesPage() {
             setShowTestDialog(false);
             router.push(`/devices/${id}`);
           }}
+        />
+      ) : null}
+
+      {editing ? (
+        <EditDeviceDialog
+          device={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => setEditing(null)}
         />
       ) : null}
     </div>

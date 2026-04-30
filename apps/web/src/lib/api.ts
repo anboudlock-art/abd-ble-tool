@@ -188,6 +188,7 @@ export interface Device {
   imei: string | null;
   model: { id: string; code: string; name: string } | null;
   firmwareVersion: string | null;
+  hardwareVersion: string | null;
   qcStatus: string;
   status: string;
   ownerType: string;
@@ -198,6 +199,13 @@ export interface Device {
   lastBattery: number | null;
   lastSeenAt: string | null;
   doorLabel: string | null;
+  notes: string | null;
+  iccid: string | null;
+  fourgMac: string | null;
+  loraE220Addr: number | null;
+  loraChannel: number | null;
+  loraDevAddr: string | null;
+  loraDevEui: string | null;
   deployedAt: string | null;
   batchId: string | null;
   batchNo: string | null;

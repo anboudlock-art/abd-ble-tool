@@ -2,9 +2,9 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Plus } from 'lucide-react';
-import { apiRequest, type CompanyListResp } from '@/lib/api';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Plus, Trash2 } from 'lucide-react';
+import { apiRequest, ApiClientError, type CompanyListResp } from '@/lib/api';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { Table, THead, TBody, Tr, Th, Td, EmptyState } from '@/components/ui/Table';
 import { Badge } from '@/components/ui/Badge';
@@ -17,6 +17,7 @@ const industryLabel: Record<string, string> = {
 };
 
 export default function CompaniesPage() {
+  const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const pageSize = 20;
 
@@ -26,6 +27,13 @@ export default function CompaniesPage() {
       apiRequest<CompanyListResp>('/api/v1/companies', {
         query: { page, pageSize },
       }),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) =>
+      apiRequest(`/api/v1/companies/${id}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['companies'] }),
+    onError: (e) => alert(e instanceof ApiClientError ? e.body.message : '删除失败'),
   });
 
   const data = q.data;
@@ -60,6 +68,7 @@ export default function CompaniesPage() {
                 <Th>用户数</Th>
                 <Th>联系人</Th>
                 <Th>创建时间</Th>
+                <Th></Th>
               </Tr>
             </THead>
             <TBody>
@@ -85,6 +94,19 @@ export default function CompaniesPage() {
                   </Td>
                   <Td className="text-xs text-slate-500">
                     {new Date(c.createdAt).toLocaleString('zh-CN')}
+                  </Td>
+                  <Td>
+                    <button
+                      onClick={() => {
+                        if (confirm(`删除公司 "${c.name}"？需先转移其设备`)) {
+                          remove.mutate(c.id);
+                        }
+                      }}
+                      className="text-slate-400 hover:text-red-500"
+                      title="删除"
+                    >
+                      <Trash2 size={14} />
+                    </button>
                   </Td>
                 </Tr>
               ))}

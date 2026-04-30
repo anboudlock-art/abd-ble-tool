@@ -1,9 +1,10 @@
 'use client';
 
-import { use } from 'react';
+import { use, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Pencil, Trash2 } from 'lucide-react';
 import {
   apiRequest,
   type Device,
@@ -12,7 +13,10 @@ import {
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Table, THead, TBody, Tr, Th, Td, EmptyState } from '@/components/ui/Table';
 import { Badge, deviceStatusLabel, deviceStatusTone } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
 import { RemoteControl } from '@/components/RemoteControl';
+import { EditDeviceDialog } from '@/components/EditDeviceDialog';
+import { useAuth } from '@/providers/AuthProvider';
 
 export default function DeviceDetailPage({
   params,
@@ -20,6 +24,11 @@ export default function DeviceDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const { user: me } = useAuth();
+  const router = useRouter();
+  const [showEdit, setShowEdit] = useState(false);
+  const isVendor = me?.role === 'vendor_admin';
+  const canEdit = isVendor || me?.role === 'company_admin';
 
   const deviceQ = useQuery({
     queryKey: ['device', id],
@@ -64,14 +73,57 @@ export default function DeviceDetailPage({
       </div>
 
       <Card>
-        <CardHeader title="基本信息" />
+        <CardHeader
+          title="基本信息"
+          action={
+            canEdit ? (
+              <div className="flex gap-2">
+                <Button variant="secondary" onClick={() => setShowEdit(true)}>
+                  <Pencil size={14} /> 编辑
+                </Button>
+                {isVendor ? (
+                  <Button
+                    variant="ghost"
+                    onClick={async () => {
+                      if (
+                        !confirm(`确定删除设备 ${d.lockId}？仅在已入库/已回收/已报废状态可删`)
+                      )
+                        return;
+                      try {
+                        await apiRequest(`/api/v1/devices/${d.id}`, {
+                          method: 'DELETE',
+                        });
+                        router.push('/devices');
+                      } catch (e) {
+                        alert(
+                          e instanceof Error ? e.message : '删除失败',
+                        );
+                      }
+                    }}
+                  >
+                    <Trash2 size={14} /> 删除
+                  </Button>
+                ) : null}
+              </div>
+            ) : null
+          }
+        />
         <CardBody>
           <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm sm:grid-cols-3">
             <Item label="型号">{d.model?.code ?? '—'}</Item>
             <Item label="名称">{d.model?.name ?? '—'}</Item>
             <Item label="批次">{d.batchNo ?? '—'}</Item>
-            <Item label="IMEI">{d.imei ?? '—'}</Item>
+            <Item label="IMEI">
+              <span className="font-mono text-xs">{d.imei ?? '—'}</span>
+            </Item>
+            <Item label="ICCID">
+              <span className="font-mono text-xs">{d.iccid ?? '—'}</span>
+            </Item>
+            <Item label="4G MAC">
+              <span className="font-mono text-xs">{d.fourgMac ?? '—'}</span>
+            </Item>
             <Item label="固件版本">{d.firmwareVersion ?? '—'}</Item>
+            <Item label="硬件版本">{d.hardwareVersion ?? '—'}</Item>
             <Item label="质检">{d.qcStatus}</Item>
             <Item label="归属">
               {d.ownerCompanyName ?? (d.ownerType === 'vendor' ? '厂商' : '—')}
@@ -89,9 +141,35 @@ export default function DeviceDetailPage({
             <Item label="出厂时间">
               {d.producedAt ? new Date(d.producedAt).toLocaleString('zh-CN') : '—'}
             </Item>
+            {(d.loraE220Addr !== null ||
+              d.loraDevAddr ||
+              d.loraDevEui) ? (
+              <>
+                <Item label="LoRa 地址">
+                  {d.loraE220Addr !== null
+                    ? `${d.loraE220Addr} / ch ${d.loraChannel ?? '—'}`
+                    : '—'}
+                </Item>
+                <Item label="DevAddr">
+                  <span className="font-mono text-xs">{d.loraDevAddr ?? '—'}</span>
+                </Item>
+                <Item label="DevEUI">
+                  <span className="font-mono text-xs">{d.loraDevEui ?? '—'}</span>
+                </Item>
+              </>
+            ) : null}
+            {d.notes ? <Item label="备注">{d.notes}</Item> : null}
           </dl>
         </CardBody>
       </Card>
+
+      {showEdit ? (
+        <EditDeviceDialog
+          device={d}
+          onClose={() => setShowEdit(false)}
+          onSaved={() => setShowEdit(false)}
+        />
+      ) : null}
 
       <RemoteControl device={d} />
 
