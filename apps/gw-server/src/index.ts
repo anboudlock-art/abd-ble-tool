@@ -105,13 +105,27 @@ subscribeDownlinks(
 server.listen(config.GW_TCP_PORT, config.GW_TCP_HOST, () => {
   rootLog.info(
     { host: config.GW_TCP_HOST, port: config.GW_TCP_PORT },
-    'gw-server listening',
+    'gw-server listening (LoRa gateway protocol)',
   );
 });
 
+// 4GBLE093 lock direct-TCP listener (port 8088 by default).
+import { buildLockTcpServer } from './lock-tcp/server.js';
+const lockServer = config.LOCK_TCP_PORT > 0 ? buildLockTcpServer(rootLog) : null;
+if (lockServer) {
+  lockServer.listen(config.LOCK_TCP_PORT, config.GW_TCP_HOST, () => {
+    rootLog.info(
+      { host: config.GW_TCP_HOST, port: config.LOCK_TCP_PORT },
+      'lock-tcp listening (4GBLE093 direct-TCP protocol)',
+    );
+  });
+}
+
 const shutdown = (signal: string) => {
   rootLog.info(`Received ${signal}, shutting down`);
-  server.close(() => process.exit(0));
+  server.close();
+  lockServer?.close();
+  setTimeout(() => process.exit(0), 500).unref();
   setTimeout(() => process.exit(1), 10_000).unref();
 };
 process.on('SIGTERM', () => shutdown('SIGTERM'));

@@ -2,12 +2,25 @@ import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { prisma } from '@abd/db';
-import { Lora } from '@abd/proto';
+import { LockTcp, Lora } from '@abd/proto';
 import { ApiError, DeviceCommandRequestSchema } from '@abd/shared';
 import { getAuthContext, scopeToCompany } from '../lib/auth.js';
-import { publishLoraCommand } from '../lib/downlink.js';
+import { publishLoraCommand, publishLockTcpDownlink } from '../lib/downlink.js';
 
 const COMMAND_TIMEOUT_MS = 10_000;
+
+/**
+ * Parse the 8-digit `lockId` (e.g. "60806001") into the 32-bit unsigned
+ * LockSN that the firmware embeds in every TCP frame. The mapping is just
+ * decimal → u32 (the lockId fits in u27).
+ */
+function parseLockSnFromLockId(lockId: string): number {
+  const n = Number.parseInt(lockId, 10);
+  if (!Number.isFinite(n) || n < 0 || n > 0xffffffff) {
+    throw ApiError.conflict(`lockId '${lockId}' cannot be encoded as 32-bit SN`);
+  }
+  return n >>> 0;
+}
 
 export default async function deviceCommandRoutes(app: FastifyInstance) {
   const typed = app.withTypeProvider<ZodTypeProvider>();
@@ -51,37 +64,74 @@ export default async function deviceCommandRoutes(app: FastifyInstance) {
         );
       }
 
-      // For now we only route via LoRa. 4G TCP path is the same idea but
-      // requires a separate "device session" registry that isn't built yet.
-      if (!device.model.hasLora || !device.gatewayId || !device.gateway) {
+      // Route by device capability:
+      //   LoRa-relay  → publish to LoRa gateway channel
+      //   4G-direct   → publish to lock-tcp downlink channel (gw-server's
+      //                 lock-tcp listener pushes onto the open socket)
+      const useLora =
+        device.model.hasLora && device.gatewayId != null && device.gateway != null;
+      const useFourG = device.model.has4g && !useLora;
+
+      if (!useLora && !useFourG) {
         throw ApiError.unsupportedOnDevice(
-          'Remote control over 4G-direct path not yet implemented; this device has no LoRa gateway',
+          'Device has no remote-control transport (no LoRa gateway, no 4G modem)',
         );
       }
-      if (!device.gateway.online) {
-        throw ApiError.offline('Gateway is offline');
-      }
-      if (device.loraE220Addr == null || device.loraChannel == null) {
-        throw ApiError.conflict('Device has no LoRa addr/channel configured');
-      }
 
-      const loraCommand =
-        commandType === 'unlock'
-          ? Lora.LoraLockCommand.UNLOCK
-          : commandType === 'lock'
-            ? Lora.LoraLockCommand.LOCK
-            : null;
-      if (loraCommand == null) {
-        throw ApiError.unsupportedOnDevice('query_status not supported over LoRa');
-      }
+      // Build the appropriate downlink frame
+      let frame: Buffer;
+      let publish: () => Promise<void>;
 
-      const macBytes = Lora.parseMac(device.bleMac);
-      const frame = Lora.encodeDownlink({
-        addr: device.loraE220Addr,
-        channel: device.loraChannel,
-        mac: macBytes,
-        command: loraCommand,
-      });
+      if (useLora) {
+        if (!device.gateway!.online) throw ApiError.offline('Gateway is offline');
+        if (device.loraE220Addr == null || device.loraChannel == null) {
+          throw ApiError.conflict('Device has no LoRa addr/channel configured');
+        }
+        const loraCommand =
+          commandType === 'unlock'
+            ? Lora.LoraLockCommand.UNLOCK
+            : commandType === 'lock'
+              ? Lora.LoraLockCommand.LOCK
+              : null;
+        if (loraCommand == null)
+          throw ApiError.unsupportedOnDevice('query_status not supported over LoRa');
+        const macBytes = Lora.parseMac(device.bleMac);
+        frame = Lora.encodeDownlink({
+          addr: device.loraE220Addr,
+          channel: device.loraChannel,
+          mac: macBytes,
+          command: loraCommand,
+        });
+        publish = () =>
+          publishLoraCommand({
+            gatewayId: device.gatewayId!,
+            loraAddr: device.loraE220Addr!,
+            loraChannel: device.loraChannel!,
+            mac: macBytes,
+            command: loraCommand,
+          });
+      } else {
+        // 4G-direct path
+        const lockSN = parseLockSnFromLockId(device.lockId);
+        // Use deviceCommand.id as the report serial after we create the row.
+        // Allocate a deterministic serial first via Date.now & 0xffff.
+        const serial = (Date.now() & 0xffff) || 1;
+        if (commandType === 'unlock') {
+          frame = LockTcp.encodeUnlock({
+            lockSN,
+            password6: '000000', // TODO: per-device password
+            ttlMinutes: 30,
+            reportSerial: serial,
+          });
+        } else if (commandType === 'query_status') {
+          frame = LockTcp.encodeQueryStatus(lockSN, serial);
+        } else {
+          throw ApiError.unsupportedOnDevice(
+            'lock command not yet wired for 4G-direct (only unlock + query_status)',
+          );
+        }
+        publish = () => publishLockTcpDownlink(device.id, frame);
+      }
 
       const cmd = await prisma.deviceCommand.create({
         data: {
@@ -89,7 +139,7 @@ export default async function deviceCommandRoutes(app: FastifyInstance) {
           commandType,
           issuedByUserId: ctx.userId,
           source: 'web',
-          gatewayId: device.gatewayId,
+          gatewayId: useLora ? device.gatewayId : null,
           requestPayload: frame,
           status: 'pending',
           timeoutAt: new Date(Date.now() + COMMAND_TIMEOUT_MS),
@@ -97,13 +147,7 @@ export default async function deviceCommandRoutes(app: FastifyInstance) {
       });
 
       try {
-        await publishLoraCommand({
-          gatewayId: device.gatewayId,
-          loraAddr: device.loraE220Addr,
-          loraChannel: device.loraChannel,
-          mac: macBytes,
-          command: loraCommand,
-        });
+        await publish();
         await prisma.deviceCommand.update({
           where: { id: cmd.id },
           data: { status: 'sent', sentAt: new Date() },
@@ -116,7 +160,7 @@ export default async function deviceCommandRoutes(app: FastifyInstance) {
             errorMessage: err instanceof Error ? err.message : 'unknown',
           },
         });
-        throw ApiError.offline('Failed to publish to gateway channel');
+        throw ApiError.offline('Failed to publish downlink');
       }
 
       reply.code(202);

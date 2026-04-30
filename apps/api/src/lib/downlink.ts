@@ -9,10 +9,29 @@ function getPublisher(): InstanceType<typeof Redis> {
 }
 
 const CHAN_DOWNLINK = 'abd:downlink';
+const CHAN_LOCK_DOWNLINK = 'abd:lock-downlink';
 
 export interface DownlinkMessage {
   gatewayId: string;
   frameHex: string;
+}
+
+export interface LockTcpDownlinkMessage {
+  deviceId: string;
+  frameHex: string;
+}
+
+/**
+ * Publish a 4GBLE093 lock TCP frame for a directly-connected device.
+ * The gw-server's lock-tcp listener subscribes to this channel and writes
+ * the frame to the open socket if it owns the session.
+ */
+export async function publishLockTcpDownlink(deviceId: bigint, frame: Buffer): Promise<void> {
+  const msg: LockTcpDownlinkMessage = {
+    deviceId: deviceId.toString(),
+    frameHex: frame.toString('hex'),
+  };
+  await getPublisher().publish(CHAN_LOCK_DOWNLINK, JSON.stringify(msg));
 }
 
 /**
