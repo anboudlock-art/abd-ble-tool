@@ -118,6 +118,124 @@ export default async function deviceRoutes(app: FastifyInstance) {
       return serialize(device);
     },
   );
+
+  /**
+   * CSV export — same filters as GET /devices, no pagination.
+   * Streams in 500-row chunks so multi-thousand-device companies don't
+   * blow up server memory.
+   */
+  typed.get(
+    '/devices/export.csv',
+    {
+      onRequest: [app.authenticate],
+      schema: {
+        querystring: DeviceListQuerySchema.partial({ page: true, pageSize: true }),
+      },
+    },
+    async (req, reply) => {
+      const ctx = getAuthContext(req);
+      const { status, modelId, ownerCompanyId, currentTeamId, search } = req.query;
+      const scope = scopeToCompany(ctx);
+
+      const where: Prisma.DeviceWhereInput = {
+        deletedAt: null,
+        ...(status ? { status } : {}),
+        ...(modelId ? { modelId: BigInt(modelId) } : {}),
+        ...(currentTeamId ? { currentTeamId: BigInt(currentTeamId) } : {}),
+        ...(ownerCompanyId ? { ownerCompanyId: BigInt(ownerCompanyId) } : {}),
+        ...(scope.companyId ? { ownerCompanyId: scope.companyId } : {}),
+        ...(search
+          ? {
+              OR: [
+                { lockId: { contains: search } },
+                { bleMac: { contains: search.toUpperCase() } },
+                { imei: { contains: search } },
+                { doorLabel: { contains: search, mode: 'insensitive' as const } },
+              ],
+            }
+          : {}),
+      };
+
+      reply.header('Content-Type', 'text/csv; charset=utf-8');
+      reply.header(
+        'Content-Disposition',
+        `attachment; filename="devices-${new Date().toISOString().slice(0, 10)}.csv"`,
+      );
+
+      const cols = [
+        'lockId',
+        'bleMac',
+        'imei',
+        'modelCode',
+        'modelName',
+        'status',
+        'qcStatus',
+        'firmwareVersion',
+        'ownerCompany',
+        'currentTeamId',
+        'doorLabel',
+        'lat',
+        'lng',
+        'lastBattery',
+        'lastSeenAt',
+        'batchNo',
+        'producedAt',
+        'createdAt',
+      ];
+
+      // UTF-8 BOM so Excel auto-detects encoding
+      const out: string[] = ['﻿' + cols.join(',')];
+
+      const PAGE = 500;
+      let cursor: bigint | undefined;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const rows = await prisma.device.findMany({
+          where,
+          include: { model: true, ownerCompany: true, batch: true },
+          orderBy: { id: 'asc' },
+          take: PAGE,
+          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        });
+        if (rows.length === 0) break;
+        for (const d of rows) {
+          out.push(
+            [
+              d.lockId,
+              d.bleMac,
+              d.imei ?? '',
+              d.model?.code ?? '',
+              d.model?.name ?? '',
+              d.status,
+              d.qcStatus,
+              d.firmwareVersion ?? '',
+              d.ownerCompany?.name ?? (d.ownerType === 'vendor' ? '厂商' : ''),
+              d.currentTeamId?.toString() ?? '',
+              d.doorLabel ?? '',
+              d.locationLat?.toString() ?? '',
+              d.locationLng?.toString() ?? '',
+              d.lastBattery?.toString() ?? '',
+              d.lastSeenAt?.toISOString() ?? '',
+              d.batch?.batchNo ?? '',
+              d.producedAt?.toISOString() ?? '',
+              d.createdAt.toISOString(),
+            ]
+              .map(csvEscape)
+              .join(','),
+          );
+        }
+        cursor = rows[rows.length - 1]!.id;
+        if (rows.length < PAGE) break;
+      }
+      return out.join('\n') + '\n';
+    },
+  );
+}
+
+function csvEscape(v: string): string {
+  if (v === '') return '';
+  if (/[",\n\r]/.test(v)) return '"' + v.replace(/"/g, '""') + '"';
+  return v;
 }
 
 type Device = Prisma.DeviceGetPayload<Record<string, never>>;

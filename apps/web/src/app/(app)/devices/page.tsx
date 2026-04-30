@@ -3,8 +3,13 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Plus, Search, Truck, UsersRound } from 'lucide-react';
-import { apiRequest, type DeviceListResp, type DeviceModel } from '@/lib/api';
+import { Download, FileUp, Plus, Search, Truck, UsersRound } from 'lucide-react';
+import {
+  apiRequest,
+  downloadFile,
+  type DeviceListResp,
+  type DeviceModel,
+} from '@/lib/api';
 import { Card } from '@/components/ui/Card';
 import { Table, THead, TBody, Tr, Th, Td, EmptyState } from '@/components/ui/Table';
 import { Badge, deviceStatusLabel, deviceStatusTone } from '@/components/ui/Badge';
@@ -13,6 +18,7 @@ import { Button } from '@/components/ui/Button';
 import { ShipDialog } from '@/components/ShipDialog';
 import { AssignDialog } from '@/components/AssignDialog';
 import { ManualRegisterDialog } from '@/components/ManualRegisterDialog';
+import { ImportDialog } from '@/components/ImportDialog';
 import { useAuth } from '@/providers/AuthProvider';
 
 const STATUS_OPTIONS = [
@@ -37,6 +43,8 @@ export default function DevicesPage() {
   const [showShipDialog, setShowShipDialog] = useState(false);
   const [showAssignDialog, setShowAssignDialog] = useState(false);
   const [showRegisterDialog, setShowRegisterDialog] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const pageSize = 20;
 
   const isVendor = user?.role === 'vendor_admin';
@@ -116,6 +124,33 @@ export default function DevicesPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-slate-900">设备</h1>
         <div className="flex items-center gap-3">
+          <Button
+            variant="ghost"
+            loading={exporting}
+            onClick={async () => {
+              setExporting(true);
+              try {
+                await downloadFile(
+                  '/api/v1/devices/export.csv',
+                  {
+                    search: search || undefined,
+                    status: status || undefined,
+                    modelId: modelId || undefined,
+                  },
+                  'devices.csv',
+                );
+              } finally {
+                setExporting(false);
+              }
+            }}
+          >
+            <Download size={14} /> 导出
+          </Button>
+          {isVendor ? (
+            <Button variant="ghost" onClick={() => setShowImportDialog(true)}>
+              <FileUp size={14} /> 导入
+            </Button>
+          ) : null}
           {isVendor ? (
             <Button variant="secondary" onClick={() => setShowRegisterDialog(true)}>
               <Plus size={14} /> 手动登记
@@ -337,6 +372,13 @@ export default function DevicesPage() {
         <ManualRegisterDialog
           onClose={() => setShowRegisterDialog(false)}
           onRegistered={() => setShowRegisterDialog(false)}
+        />
+      ) : null}
+
+      {showImportDialog ? (
+        <ImportDialog
+          onClose={() => setShowImportDialog(false)}
+          onDone={() => setShowImportDialog(false)}
         />
       ) : null}
     </div>

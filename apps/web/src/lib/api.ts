@@ -39,6 +39,52 @@ export const tokenStorage = {
 const baseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3001';
 
+/**
+ * Fetch a binary/text file (e.g. CSV export) with the bearer token,
+ * then trigger a browser download. Bypasses JSON parsing and runs
+ * outside React Query.
+ */
+export async function downloadFile(
+  path: string,
+  query: Record<string, string | number | boolean | undefined> = {},
+  filename = 'download',
+): Promise<void> {
+  const headers = new Headers({ Accept: '*/*' });
+  const token = tokenStorage.get();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+
+  const url = new URL(
+    path.startsWith('http') ? path : (baseUrl || '') + path,
+    typeof window !== 'undefined' ? window.location.origin : 'http://localhost',
+  );
+  for (const [k, v] of Object.entries(query)) {
+    if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
+  }
+
+  const res = await fetch(url.toString(), { headers });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new ApiClientError(res.status, {
+      code: 'DOWNLOAD_FAILED',
+      message: body || `HTTP ${res.status}`,
+    });
+  }
+  const blob = await res.blob();
+  // Server may set Content-Disposition; honour that filename if present.
+  const dispo = res.headers.get('Content-Disposition');
+  const m = dispo?.match(/filename="?([^"]+)"?/);
+  const finalName = m?.[1] ?? filename;
+
+  const blobUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.download = finalName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(blobUrl);
+}
+
 export interface ApiRequestInit extends Omit<RequestInit, 'body'> {
   body?: unknown;
   query?: Record<string, string | number | boolean | undefined>;
