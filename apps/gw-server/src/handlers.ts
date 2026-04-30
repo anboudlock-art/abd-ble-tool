@@ -1,5 +1,5 @@
 import { Gateway, Lora } from '@abd/proto';
-import { prisma } from '@abd/db';
+import { notify, prisma } from '@abd/db';
 import type { GatewaySession } from './session.js';
 import { publishLockEvent } from './pubsub.js';
 
@@ -201,6 +201,21 @@ async function raiseAlarm(args: {
       payload: args.payload as never,
       dedupKey,
     },
+  });
+  // Fan out an in-app notification to the device's company (or to vendor
+  // admins if the device is still vendor-owned).
+  await notify({
+    companyId: args.companyId,
+    kind: 'alarm',
+    title:
+      args.severity === 'critical'
+        ? '设备严重告警'
+        : args.severity === 'warning'
+          ? '设备告警'
+          : '设备提示',
+    body: args.message,
+    link: '/alarms',
+    payload: { deviceId: args.deviceId.toString(), type: args.type },
   });
 }
 

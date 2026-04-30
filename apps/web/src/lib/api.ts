@@ -4,6 +4,7 @@
  */
 
 const TOKEN_KEY = 'abd:access_token';
+const REFRESH_TOKEN_KEY = 'abd:refresh_token';
 
 export interface ApiErrorBody {
   code: string;
@@ -30,11 +31,57 @@ export const tokenStorage = {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(TOKEN_KEY, token);
   },
+  getRefresh(): string | null {
+    if (typeof window === 'undefined') return null;
+    return window.localStorage.getItem(REFRESH_TOKEN_KEY);
+  },
+  setRefresh(refreshToken: string) {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+  },
   clear() {
     if (typeof window === 'undefined') return;
     window.localStorage.removeItem(TOKEN_KEY);
+    window.localStorage.removeItem(REFRESH_TOKEN_KEY);
   },
 };
+
+/**
+ * Single in-flight refresh promise to prevent stampedes when many requests
+ * 401 simultaneously.
+ */
+let refreshInFlight: Promise<string | null> | null = null;
+
+async function tryRefresh(): Promise<string | null> {
+  if (refreshInFlight) return refreshInFlight;
+  const refreshToken = tokenStorage.getRefresh();
+  if (!refreshToken) return null;
+  refreshInFlight = (async () => {
+    try {
+      const res = await fetch(
+        (baseUrl || '') + '/api/v1/auth/refresh',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken }),
+        },
+      );
+      if (!res.ok) {
+        tokenStorage.clear();
+        return null;
+      }
+      const data = (await res.json()) as { accessToken: string; refreshToken: string };
+      tokenStorage.set(data.accessToken);
+      tokenStorage.setRefresh(data.refreshToken);
+      return data.accessToken;
+    } catch {
+      return null;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
+}
 
 const baseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3001';
@@ -88,6 +135,8 @@ export async function downloadFile(
 export interface ApiRequestInit extends Omit<RequestInit, 'body'> {
   body?: unknown;
   query?: Record<string, string | number | boolean | undefined>;
+  /** internal: prevent infinite refresh-retry loop */
+  __retried?: boolean;
 }
 
 export async function apiRequest<T = unknown>(
@@ -152,7 +201,17 @@ export async function apiRequest<T = unknown>(
       parsed && typeof parsed === 'object'
         ? (parsed as ApiErrorBody)
         : { code: 'HTTP_ERROR', message: `HTTP ${res.status}` };
-    if (res.status === 401) tokenStorage.clear();
+
+    // 401 → try once to refresh and retry. The refresh endpoint itself is
+    // exempt to avoid an infinite loop.
+    const isRefreshCall = path.includes('/auth/refresh');
+    if (res.status === 401 && !isRefreshCall && !init.__retried) {
+      const newToken = await tryRefresh();
+      if (newToken) {
+        return apiRequest(path, { ...init, __retried: true } as ApiRequestInit);
+      }
+      tokenStorage.clear();
+    }
     throw new ApiClientError(res.status, body);
   }
 
@@ -417,6 +476,25 @@ export interface AlarmListResp {
   items: Alarm[];
   total: number;
   openCount: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface Notification {
+  id: string;
+  kind: 'alarm' | 'ship' | 'deliver' | 'assign' | 'remote_command' | 'system';
+  title: string;
+  body: string;
+  link: string | null;
+  payload: unknown;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export interface NotificationListResp {
+  items: Notification[];
+  total: number;
+  unreadCount: number;
   page: number;
   pageSize: number;
 }

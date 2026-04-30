@@ -4,7 +4,13 @@ import fastifyCors from '@fastify/cors';
 import fastifyHelmet from '@fastify/helmet';
 import fastifyRateLimit from '@fastify/rate-limit';
 import fastifySensible from '@fastify/sensible';
-import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
+import fastifySwagger from '@fastify/swagger';
+import fastifySwaggerUi from '@fastify/swagger-ui';
+import {
+  jsonSchemaTransform,
+  serializerCompiler,
+  validatorCompiler,
+} from 'fastify-type-provider-zod';
 import { loadConfig } from './config.js';
 import authPlugin from './middlewares/auth.js';
 import errorHandlerPlugin from './middlewares/error-handler.js';
@@ -22,6 +28,7 @@ import userRoutes from './routes/users.js';
 import deviceCommandRoutes from './routes/device-commands.js';
 import alarmRoutes from './routes/alarms.js';
 import dashboardRoutes from './routes/dashboard.js';
+import notificationRoutes from './routes/notifications.js';
 import integrationRoutes from './routes/integrations.js';
 import openApiRoutes from './routes/open-api.js';
 import openApiAuthPlugin from './middlewares/open-api-auth.js';
@@ -48,7 +55,39 @@ export async function buildApp() {
 
   await app.register(fastifySensible);
   await app.register(fastifyCors, { origin: config.CORS_ORIGIN, credentials: true });
-  await app.register(fastifyHelmet);
+  // Helmet is fine for normal API traffic but its strict CSP breaks
+  // Swagger UI's inline-script bootstrap. Allow inline 'self' for /docs.
+  await app.register(fastifyHelmet, { contentSecurityPolicy: false });
+
+  // OpenAPI: build a spec from every zod-validated route, render it at /docs.
+  if (config.NODE_ENV !== 'test') {
+    await app.register(fastifySwagger, {
+      openapi: {
+        info: {
+          title: 'Anboud Smart Lock Platform — Internal API',
+          description:
+            'JWT-protected API for the management Web. For third-party integration (HMAC-signed), see /openapi/v1/*.',
+          version: '0.1.0',
+        },
+        servers: [{ url: '/' }],
+        components: {
+          securitySchemes: {
+            bearerAuth: {
+              type: 'http',
+              scheme: 'bearer',
+              bearerFormat: 'JWT',
+            },
+          },
+        },
+        security: [{ bearerAuth: [] }],
+      },
+      transform: jsonSchemaTransform,
+    });
+    await app.register(fastifySwaggerUi, {
+      routePrefix: '/docs',
+      uiConfig: { docExpansion: 'list', deepLinking: true },
+    });
+  }
   await app.register(fastifyRateLimit, {
     max: config.NODE_ENV === 'test' ? 10_000 : 100,
     timeWindow: '1 minute',
@@ -70,6 +109,7 @@ export async function buildApp() {
   await app.register(deviceCommandRoutes, { prefix: '/api/v1' });
   await app.register(alarmRoutes, { prefix: '/api/v1' });
   await app.register(dashboardRoutes, { prefix: '/api/v1' });
+  await app.register(notificationRoutes, { prefix: '/api/v1' });
   await app.register(integrationRoutes, { prefix: '/api/v1' });
 
   // Public Open API for third-party integrations. Different prefix + HMAC auth.

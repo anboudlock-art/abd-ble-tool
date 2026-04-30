@@ -1,10 +1,17 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
+import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { prisma } from '@abd/db';
 import { ChangePasswordSchema, LoginRequestSchema, SetPasswordSchema, ApiError } from '@abd/shared';
 import { loadConfig } from '../config.js';
+
+function newRefreshToken(): { plain: string; hash: string } {
+  const plain = randomBytes(48).toString('base64url');
+  const hash = createHash('sha256').update(plain).digest('hex');
+  return { plain, hash };
+}
 
 export default async function authRoutes(app: FastifyInstance) {
   const typed = app.withTypeProvider<ZodTypeProvider>();
@@ -18,6 +25,7 @@ export default async function authRoutes(app: FastifyInstance) {
         response: {
           200: z.object({
             accessToken: z.string(),
+            refreshToken: z.string(),
             user: z.object({
               id: z.string(),
               name: z.string(),
@@ -49,8 +57,22 @@ export default async function authRoutes(app: FastifyInstance) {
         companyId: user.companyId?.toString() ?? null,
       });
 
+      // Refresh token is a 48-byte random string; we store only its
+      // SHA-256 in the DB. TTL = REFRESH_TOKEN_TTL_DAYS.
+      const { plain: refreshToken, hash } = newRefreshToken();
+      await prisma.refreshToken.create({
+        data: {
+          tokenHash: hash,
+          userId: user.id,
+          expiresAt: new Date(Date.now() + config.REFRESH_TOKEN_TTL_DAYS * 86400_000),
+          userAgent: req.headers['user-agent']?.toString().slice(0, 255) ?? null,
+          clientIp: req.ip,
+        },
+      });
+
       return {
         accessToken,
+        refreshToken,
         user: {
           id: user.id.toString(),
           name: user.name,
@@ -59,6 +81,78 @@ export default async function authRoutes(app: FastifyInstance) {
           mustChangePassword: user.mustChangePassword,
         },
       };
+    },
+  );
+
+  /**
+   * Exchange a refresh token for a new short-lived access token. Rotates
+   * the refresh token (issuing a fresh one and revoking the old) so a
+   * leaked refresh token can be used at most once.
+   */
+  typed.post(
+    '/auth/refresh',
+    {
+      schema: {
+        body: z.object({ refreshToken: z.string().min(20) }),
+      },
+    },
+    async (req) => {
+      const hash = createHash('sha256').update(req.body.refreshToken).digest('hex');
+      const row = await prisma.refreshToken.findUnique({ where: { tokenHash: hash } });
+      if (!row || row.revokedAt || row.expiresAt < new Date()) {
+        throw ApiError.unauthorized('Invalid or expired refresh token');
+      }
+      const user = await prisma.user.findUnique({ where: { id: row.userId } });
+      if (!user || user.status !== 'active' || user.deletedAt) {
+        throw ApiError.unauthorized();
+      }
+
+      // Rotate
+      const fresh = newRefreshToken();
+      await prisma.$transaction([
+        prisma.refreshToken.update({
+          where: { id: row.id },
+          data: { revokedAt: new Date(), lastUsedAt: new Date() },
+        }),
+        prisma.refreshToken.create({
+          data: {
+            tokenHash: fresh.hash,
+            userId: user.id,
+            expiresAt: new Date(Date.now() + config.REFRESH_TOKEN_TTL_DAYS * 86400_000),
+            userAgent: req.headers['user-agent']?.toString().slice(0, 255) ?? null,
+            clientIp: req.ip,
+          },
+        }),
+      ]);
+
+      const accessToken = app.jwt.sign({
+        sub: user.id.toString(),
+        role: user.role,
+        companyId: user.companyId?.toString() ?? null,
+      });
+
+      return { accessToken, refreshToken: fresh.plain };
+    },
+  );
+
+  /** Logout: revoke the supplied refresh token (best-effort). */
+  typed.post(
+    '/auth/logout',
+    {
+      onRequest: [app.authenticate],
+      schema: {
+        body: z.object({ refreshToken: z.string().min(20).optional() }),
+      },
+    },
+    async (req, reply) => {
+      if (req.body.refreshToken) {
+        const hash = createHash('sha256').update(req.body.refreshToken).digest('hex');
+        await prisma.refreshToken.updateMany({
+          where: { tokenHash: hash, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      }
+      reply.code(204);
     },
   );
 

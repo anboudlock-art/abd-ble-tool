@@ -52,12 +52,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (phone: string, password: string) => {
       const resp = await apiRequest<{
         accessToken: string;
+        refreshToken: string;
         user: User;
       }>('/api/v1/auth/login', {
         method: 'POST',
         body: { phone, password },
       });
       tokenStorage.set(resp.accessToken);
+      tokenStorage.setRefresh(resp.refreshToken);
       const fullUser = { ...resp.user, phone };
       setUser(fullUser);
       router.push(fullUser.mustChangePassword ? '/change-password' : '/dashboard');
@@ -66,8 +68,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(() => {
+    const refreshToken = tokenStorage.getRefresh();
     tokenStorage.clear();
     setUser(null);
+    // Best-effort revoke server-side; we already wiped local state so
+    // failures don't matter for UX.
+    if (refreshToken) {
+      void apiRequest('/api/v1/auth/logout', {
+        method: 'POST',
+        body: { refreshToken },
+      }).catch(() => undefined);
+    }
     router.push('/login');
   }, [router]);
 

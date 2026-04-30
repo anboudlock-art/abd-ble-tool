@@ -2,7 +2,7 @@ import { Worker, Queue } from 'bullmq';
 import { Redis } from 'ioredis';
 import pino from 'pino';
 import { z } from 'zod';
-import { prisma } from '@abd/db';
+import { notify, prisma } from '@abd/db';
 import { signWebhookBody } from './hmac.js';
 
 const ConfigSchema = z.object({
@@ -123,15 +123,23 @@ const workers = [
           where: { id: cmd.id },
           data: { status: 'timeout' },
         });
+        const msg = `锁 ${cmd.device.lockId} 远程指令 ${cmd.commandType} 超时未响应`;
         await prisma.alarm.create({
           data: {
             deviceId: cmd.deviceId,
             companyId: cmd.device.ownerCompanyId,
             type: 'command_timeout',
             severity: 'warning',
-            message: `锁 ${cmd.device.lockId} 远程指令 ${cmd.commandType} 超时未响应`,
+            message: msg,
             payload: { commandId: cmd.id.toString() },
           },
+        });
+        await notify({
+          companyId: cmd.device.ownerCompanyId,
+          kind: 'alarm',
+          title: '指令超时',
+          body: msg,
+          link: `/devices/${cmd.deviceId}`,
         });
       }
     },
@@ -176,19 +184,27 @@ const workers = [
           select: { id: true },
         });
         if (existing) continue;
+        const msg = `锁 ${d.lockId} 已超过 60 分钟未上报`;
         await prisma.alarm.create({
           data: {
             deviceId: d.id,
             companyId: d.ownerCompanyId,
             type: 'offline',
             severity: 'warning',
-            message: `锁 ${d.lockId} 已超过 60 分钟未上报`,
+            message: msg,
             payload: {
               lastSeenAt: d.lastSeenAt!.toISOString(),
               cutoff: cutoff.toISOString(),
             },
             dedupKey,
           },
+        });
+        await notify({
+          companyId: d.ownerCompanyId,
+          kind: 'alarm',
+          title: '设备离线',
+          body: msg,
+          link: `/devices/${d.id}`,
         });
         raised++;
       }

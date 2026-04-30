@@ -9,6 +9,8 @@ import type { FastifyInstance } from 'fastify';
 export async function resetDb(): Promise<void> {
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
+      notification,
+      refresh_token,
       alarm,
       webhook_delivery,
       webhook_subscription,
