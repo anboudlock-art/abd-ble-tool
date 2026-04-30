@@ -326,6 +326,29 @@ export type UpdateTeamInput = z.infer<typeof UpdateTeamSchema>;
 
 // -------------------- Test devices (skip production flow) --------------------
 
+// -------------------- Alarms --------------------
+
+export const AlarmTypeEnum = z.enum([
+  'low_battery',
+  'offline',
+  'tampered',
+  'command_timeout',
+]);
+
+export const AlarmSeverityEnum = z.enum(['info', 'warning', 'critical']);
+export const AlarmStatusEnum = z.enum(['open', 'acknowledged', 'resolved']);
+
+export const AlarmListQuerySchema = PaginationSchema.extend({
+  status: AlarmStatusEnum.optional(),
+  severity: AlarmSeverityEnum.optional(),
+  type: AlarmTypeEnum.optional(),
+  deviceId: z.coerce.number().int().positive().optional(),
+  since: z.string().datetime().optional(),
+});
+export type AlarmListQuery = z.infer<typeof AlarmListQuerySchema>;
+
+// -------------------- Test devices (skip production flow) --------------------
+
 export const CreateTestDeviceSchema = z.object({
   lockId: z.string().regex(/^\d{8}$/),
   bleMac: z.string().regex(/^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$/),

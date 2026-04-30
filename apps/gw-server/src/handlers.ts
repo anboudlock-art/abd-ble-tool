@@ -134,7 +134,74 @@ export async function handleLoraUplink(s: GatewaySession, payload: Buffer): Prom
     }
   }
 
+  // ---------- Alarm rules ----------
+  // 1) Tampered → critical alarm, deduped per device per minute
+  if (uplink.status === Lora.LoraLockStatus.TAMPERED) {
+    await raiseAlarm({
+      deviceId: device.id,
+      companyId: device.ownerCompanyId,
+      type: 'tampered',
+      severity: 'critical',
+      message: `锁 ${device.lockId} 上报破拆/剪断信号`,
+      triggeredEventId: event.id,
+      dedupBucket: Math.floor(now.getTime() / 60_000),
+    });
+  }
+
+  // 2) Low-battery rising-edge → warning. Only fire when crossing the
+  //    threshold so we don't spam an alarm for every uplink at 18%.
+  const wasAbove = (device.lastBattery ?? 100) >= 20;
+  const nowBelow = uplink.battery < 20;
+  if (wasAbove && nowBelow) {
+    await raiseAlarm({
+      deviceId: device.id,
+      companyId: device.ownerCompanyId,
+      type: 'low_battery',
+      severity: uplink.battery < 10 ? 'critical' : 'warning',
+      message: `锁 ${device.lockId} 电量降至 ${uplink.battery}%`,
+      triggeredEventId: event.id,
+      payload: { battery: uplink.battery, prev: device.lastBattery },
+    });
+  }
+
   await publishLockEvent({ eventId: event.id.toString(), deviceId: device.id.toString() });
+}
+
+/** Insert an alarm row, with optional dedup so one event doesn't spam. */
+async function raiseAlarm(args: {
+  deviceId: bigint;
+  companyId: bigint | null;
+  type: 'low_battery' | 'offline' | 'tampered' | 'command_timeout';
+  severity: 'info' | 'warning' | 'critical';
+  message: string;
+  triggeredEventId?: bigint;
+  payload?: object;
+  dedupBucket?: number;
+}): Promise<void> {
+  const dedupKey = args.dedupBucket
+    ? `${args.deviceId}:${args.type}:${args.dedupBucket}`
+    : null;
+
+  if (dedupKey) {
+    const existing = await prisma.alarm.findFirst({
+      where: { dedupKey },
+      select: { id: true },
+    });
+    if (existing) return;
+  }
+
+  await prisma.alarm.create({
+    data: {
+      deviceId: args.deviceId,
+      companyId: args.companyId,
+      type: args.type,
+      severity: args.severity,
+      message: args.message,
+      triggeredEventId: args.triggeredEventId,
+      payload: args.payload as never,
+      dedupKey,
+    },
+  });
 }
 
 function uplinkStatusToEventType(s: Lora.LoraLockStatus): 'opened' | 'closed' | 'tampered' {

@@ -60,7 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       tokenStorage.set(resp.accessToken);
       const fullUser = { ...resp.user, phone };
       setUser(fullUser);
-      router.push(fullUser.mustChangePassword ? '/change-password' : '/devices');
+      router.push(fullUser.mustChangePassword ? '/change-password' : '/dashboard');
     },
     [router],
   );

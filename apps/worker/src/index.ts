@@ -25,11 +25,13 @@ const connection = new Redis(config.REDIS_URL, { maxRetriesPerRequest: null });
 export const QUEUE_WEBHOOK_DELIVERY = 'webhook-delivery';
 export const QUEUE_COMMAND_TIMEOUT = 'command-timeout';
 export const QUEUE_NOTIFICATIONS = 'notifications';
+export const QUEUE_OFFLINE_CHECK = 'offline-check';
 
 export const queues = {
   webhookDelivery: new Queue(QUEUE_WEBHOOK_DELIVERY, { connection }),
   commandTimeout: new Queue(QUEUE_COMMAND_TIMEOUT, { connection }),
   notifications: new Queue(QUEUE_NOTIFICATIONS, { connection }),
+  offlineCheck: new Queue(QUEUE_OFFLINE_CHECK, { connection }),
 };
 
 interface WebhookJob {
@@ -111,12 +113,25 @@ const workers = [
     QUEUE_COMMAND_TIMEOUT,
     async (job) => {
       const { commandId } = job.data as { commandId: string };
-      const cmd = await prisma.deviceCommand.findUnique({ where: { id: BigInt(commandId) } });
+      const cmd = await prisma.deviceCommand.findUnique({
+        where: { id: BigInt(commandId) },
+        include: { device: true },
+      });
       if (!cmd) return;
       if (cmd.status === 'pending' || cmd.status === 'sent') {
         await prisma.deviceCommand.update({
           where: { id: cmd.id },
           data: { status: 'timeout' },
+        });
+        await prisma.alarm.create({
+          data: {
+            deviceId: cmd.deviceId,
+            companyId: cmd.device.ownerCompanyId,
+            type: 'command_timeout',
+            severity: 'warning',
+            message: `锁 ${cmd.device.lockId} 远程指令 ${cmd.commandType} 超时未响应`,
+            payload: { commandId: cmd.id.toString() },
+          },
         });
       }
     },
@@ -129,6 +144,57 @@ const workers = [
       log.info({ jobId: job.id, data: job.data }, 'notification dispatch (stub)');
     },
     { connection },
+  ),
+
+  /**
+   * Periodic offline check: any device whose lastSeenAt is older than the
+   * threshold AND that we haven't already alerted for in the current
+   * lastSeenAt window gets a single offline alarm.
+   *
+   * Threshold: 1 hour for devices that have ever reported (lastSeenAt set).
+   * Devices that have never reported are NOT counted (might just be in
+   * warehouse waiting to be installed).
+   */
+  new Worker(
+    QUEUE_OFFLINE_CHECK,
+    async () => {
+      const cutoff = new Date(Date.now() - 60 * 60 * 1000);
+      const stale = await prisma.device.findMany({
+        where: {
+          status: 'active',
+          lastSeenAt: { lt: cutoff },
+          deletedAt: null,
+        },
+        select: { id: true, lockId: true, ownerCompanyId: true, lastSeenAt: true },
+      });
+      let raised = 0;
+      for (const d of stale) {
+        // dedup by device + lastSeenAt (one alarm per offline window)
+        const dedupKey = `${d.id}:offline:${d.lastSeenAt!.getTime()}`;
+        const existing = await prisma.alarm.findFirst({
+          where: { dedupKey },
+          select: { id: true },
+        });
+        if (existing) continue;
+        await prisma.alarm.create({
+          data: {
+            deviceId: d.id,
+            companyId: d.ownerCompanyId,
+            type: 'offline',
+            severity: 'warning',
+            message: `锁 ${d.lockId} 已超过 60 分钟未上报`,
+            payload: {
+              lastSeenAt: d.lastSeenAt!.toISOString(),
+              cutoff: cutoff.toISOString(),
+            },
+            dedupKey,
+          },
+        });
+        raised++;
+      }
+      if (raised > 0) log.info({ raised }, 'offline alarms raised');
+    },
+    { connection, concurrency: 1 },
   ),
 ];
 
@@ -182,6 +248,16 @@ subscriber.on('message', async (channel, raw) => {
     log.warn({ err }, 'fan-out failed');
   }
 });
+
+// Recurring jobs
+await queues.offlineCheck.add(
+  'offline-sweep',
+  {},
+  {
+    repeat: { every: 5 * 60 * 1000 }, // every 5 minutes
+    jobId: 'offline-sweep-singleton',
+  },
+);
 
 log.info({ queues: workers.map((w) => w.name) }, 'worker started');
 

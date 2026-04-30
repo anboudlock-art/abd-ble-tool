@@ -20,6 +20,8 @@ import companyRoutes from './routes/companies.js';
 import departmentRoutes from './routes/departments.js';
 import userRoutes from './routes/users.js';
 import deviceCommandRoutes from './routes/device-commands.js';
+import alarmRoutes from './routes/alarms.js';
+import dashboardRoutes from './routes/dashboard.js';
 import integrationRoutes from './routes/integrations.js';
 import openApiRoutes from './routes/open-api.js';
 import openApiAuthPlugin from './middlewares/open-api-auth.js';
@@ -66,6 +68,8 @@ export async function buildApp() {
   await app.register(departmentRoutes, { prefix: '/api/v1' });
   await app.register(userRoutes, { prefix: '/api/v1' });
   await app.register(deviceCommandRoutes, { prefix: '/api/v1' });
+  await app.register(alarmRoutes, { prefix: '/api/v1' });
+  await app.register(dashboardRoutes, { prefix: '/api/v1' });
   await app.register(integrationRoutes, { prefix: '/api/v1' });
 
   // Public Open API for third-party integrations. Different prefix + HMAC auth.

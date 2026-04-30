@@ -398,6 +398,58 @@ export interface WebhookSubscriptionCreated extends WebhookSubscription {
   createdAt: string;
 }
 
+export interface Alarm {
+  id: string;
+  deviceId: string;
+  lockId: string | null;
+  type: 'low_battery' | 'offline' | 'tampered' | 'command_timeout';
+  severity: 'info' | 'warning' | 'critical';
+  status: 'open' | 'acknowledged' | 'resolved';
+  message: string;
+  payload: unknown;
+  triggeredAt: string;
+  acknowledgedAt: string | null;
+  acknowledgedByUserId: string | null;
+  resolvedAt: string | null;
+}
+
+export interface AlarmListResp {
+  items: Alarm[];
+  total: number;
+  openCount: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface DashboardSummary {
+  deviceCounts: {
+    total: number;
+    byStatus: Record<string, number>;
+  };
+  online: {
+    active: number;
+    online: number;
+    rate: number | null;
+  };
+  alarms: {
+    open: number;
+    byCritical: number;
+    byWarning: number;
+    byInfo: number;
+  };
+  events: {
+    recent7d: number;
+    histogram: Array<{ day: string; count: number }>;
+  };
+  recentDevices: Array<{
+    id: string;
+    lockId: string;
+    lastState: string;
+    lastBattery: number | null;
+    lastSeenAt: string;
+  }>;
+}
+
 export interface DeviceCommand {
   id: string;
   commandType: string;
