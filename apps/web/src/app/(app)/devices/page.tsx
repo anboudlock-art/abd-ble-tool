@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Search, Truck, UsersRound } from 'lucide-react';
+import { Plus, Search, Truck, UsersRound } from 'lucide-react';
 import { apiRequest, type DeviceListResp, type DeviceModel } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
 import { Table, THead, TBody, Tr, Th, Td, EmptyState } from '@/components/ui/Table';
@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { ShipDialog } from '@/components/ShipDialog';
 import { AssignDialog } from '@/components/AssignDialog';
+import { ManualRegisterDialog } from '@/components/ManualRegisterDialog';
 import { useAuth } from '@/providers/AuthProvider';
 
 const STATUS_OPTIONS = [
@@ -35,6 +36,7 @@ export default function DevicesPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showShipDialog, setShowShipDialog] = useState(false);
   const [showAssignDialog, setShowAssignDialog] = useState(false);
+  const [showRegisterDialog, setShowRegisterDialog] = useState(false);
   const pageSize = 20;
 
   const isVendor = user?.role === 'vendor_admin';
@@ -114,6 +116,11 @@ export default function DevicesPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-slate-900">设备</h1>
         <div className="flex items-center gap-3">
+          {isVendor ? (
+            <Button variant="secondary" onClick={() => setShowRegisterDialog(true)}>
+              <Plus size={14} /> 手动登记
+            </Button>
+          ) : null}
           {isVendor && selectedShippable.length > 0 ? (
             <Button onClick={() => setShowShipDialog(true)}>
               <Truck size={14} /> 发货 ({selectedShippable.length})
@@ -323,6 +330,13 @@ export default function DevicesPage() {
             setShowAssignDialog(false);
             setSelected(new Set());
           }}
+        />
+      ) : null}
+
+      {showRegisterDialog ? (
+        <ManualRegisterDialog
+          onClose={() => setShowRegisterDialog(false)}
+          onRegistered={() => setShowRegisterDialog(false)}
         />
       ) : null}
     </div>
