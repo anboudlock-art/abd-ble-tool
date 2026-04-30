@@ -47,12 +47,26 @@ function Body() {
     },
   });
 
+  const [revealed, setRevealed] = useState<{
+    name: string;
+    phone: string;
+    initialPassword: string;
+  } | null>(null);
+
   const m = useMutation({
     mutationFn: (input: CreateUserInput) =>
-      apiRequest<{ id: string }>('/api/v1/users', { method: 'POST', body: input }),
-    onSuccess: () => {
-      if (presetCompany) router.push(`/companies/${presetCompany}`);
-      else router.push('/users');
+      apiRequest<{
+        id: string;
+        name: string;
+        phone: string;
+        initialPassword: string;
+      }>('/api/v1/users', { method: 'POST', body: input }),
+    onSuccess: (resp) => {
+      setRevealed({
+        name: resp.name,
+        phone: resp.phone,
+        initialPassword: resp.initialPassword,
+      });
     },
     onError: (err) => setServerError(err instanceof ApiClientError ? err.body.message : '创建失败'),
   });
@@ -126,11 +140,11 @@ function Body() {
             </Field>
 
             <Field
-              label="初始密码"
-              hint="留空则发送邀请，用户首次登录时设置"
+              label="初始密码（可选）"
+              hint="留空则系统自动生成。用户首次登录后必须修改，临时密码失效。"
               error={errors.initialPassword?.message}
             >
-              <Input type="password" invalid={!!errors.initialPassword} {...register('initialPassword')} />
+              <Input type="text" invalid={!!errors.initialPassword} {...register('initialPassword')} />
             </Field>
 
             {serverError ? (
@@ -150,6 +164,55 @@ function Body() {
           </form>
         </CardBody>
       </Card>
+
+      {revealed ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4">
+          <div className="w-full max-w-md rounded-lg bg-white shadow-xl">
+            <div className="border-b border-slate-100 px-5 py-3">
+              <h2 className="text-base font-semibold">用户已创建：{revealed.name}</h2>
+              <p className="mt-1 text-xs text-amber-600">
+                ⚠️ 初始密码仅本次显示，请告知用户并提示首次登录后必须修改
+              </p>
+            </div>
+            <div className="space-y-3 px-5 py-5">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-700">手机号</label>
+                <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-sm">
+                  {revealed.phone}
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-700">初始密码</label>
+                <div className="flex items-center gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2">
+                  <code className="flex-1 break-all font-mono text-sm">
+                    {revealed.initialPassword}
+                  </code>
+                  <button
+                    onClick={() =>
+                      navigator.clipboard?.writeText(revealed.initialPassword)
+                    }
+                    className="text-slate-500 hover:text-slate-900"
+                    title="复制"
+                  >
+                    复制
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-100 px-5 py-3">
+              <Button
+                onClick={() => {
+                  setRevealed(null);
+                  if (presetCompany) router.push(`/companies/${presetCompany}`);
+                  else router.push('/users');
+                }}
+              >
+                我已记下
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

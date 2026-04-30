@@ -2,16 +2,38 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Boxes, Building2, Lock, LogOut, Plug, UsersRound } from 'lucide-react';
+import { Boxes, Building2, KeyRound, Lock, LogOut, Plug, UsersRound } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useAuth } from '@/providers/AuthProvider';
 
-const items = [
+interface NavItem {
+  href: string;
+  label: string;
+  icon: typeof Lock;
+  roles?: string[];
+}
+
+const items: NavItem[] = [
   { href: '/devices', label: '设备', icon: Lock },
-  { href: '/batches', label: '生产批次', icon: Boxes },
-  { href: '/companies', label: '客户公司', icon: Building2 },
-  { href: '/users', label: '人员', icon: UsersRound },
-  { href: '/integrations', label: '对接 API', icon: Plug },
+  {
+    href: '/batches',
+    label: '生产批次',
+    icon: Boxes,
+    roles: ['vendor_admin', 'production_operator'],
+  },
+  { href: '/companies', label: '客户公司', icon: Building2, roles: ['vendor_admin'] },
+  {
+    href: '/users',
+    label: '人员',
+    icon: UsersRound,
+    roles: ['vendor_admin', 'company_admin', 'dept_admin', 'team_leader'],
+  },
+  {
+    href: '/integrations',
+    label: '对接 API',
+    icon: Plug,
+    roles: ['vendor_admin', 'company_admin'],
+  },
 ];
 
 export function Sidebar() {
@@ -26,7 +48,9 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 space-y-1 px-3">
-        {items.map((it) => {
+        {items
+          .filter((it) => !it.roles || (user?.role && it.roles.includes(user.role)))
+          .map((it) => {
           const active = pathname.startsWith(it.href);
           const Icon = it.icon;
           return (
@@ -52,6 +76,12 @@ export function Sidebar() {
           {user?.name ?? ''}
           <span className="ml-1 text-slate-400">({user?.role})</span>
         </div>
+        <Link
+          href="/change-password"
+          className="mb-1 flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-slate-500 hover:bg-slate-100"
+        >
+          <KeyRound size={14} /> 修改密码
+        </Link>
         <button
           onClick={logout}
           className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-slate-500 hover:bg-slate-100"

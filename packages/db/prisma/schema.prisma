@@ -127,6 +127,7 @@ model User {
   name          String     @db.VarChar(64)
   employeeNo    String?    @map("employee_no") @db.VarChar(32)
   passwordHash  String?    @map("password_hash") @db.VarChar(255)
+  mustChangePassword Boolean @default(false) @map("must_change_password")
   role          UserRole   @default(member)
   status        UserStatus @default(active)
   lastLoginAt   DateTime?  @map("last_login_at")

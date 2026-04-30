@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
+import { randomInt } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { prisma } from '@abd/db';
 import {
@@ -121,6 +122,13 @@ export default async function userRoutes(app: FastifyInstance) {
         }
       }
 
+      // Always assign a password — admin-supplied or auto-generated.
+      // Force change on first login either way, so the temporary value
+      // is one-shot and never persists as the user's real credential.
+      const plaintextPassword =
+        initialPassword?.trim() || generateTempPassword();
+      const passwordHash = await bcrypt.hash(plaintextPassword, 12);
+
       const user = await prisma.$transaction(async (tx) => {
         const u = await tx.user.create({
           data: {
@@ -130,8 +138,9 @@ export default async function userRoutes(app: FastifyInstance) {
             employeeNo,
             email,
             role,
-            passwordHash: initialPassword ? await bcrypt.hash(initialPassword, 12) : null,
-            status: initialPassword ? 'active' : 'invited',
+            passwordHash,
+            status: 'active',
+            mustChangePassword: true,
           },
         });
         if (teamId) {
@@ -154,7 +163,45 @@ export default async function userRoutes(app: FastifyInstance) {
         phone: user.phone,
         role: user.role,
         status: user.status,
+        // Plaintext shown ONCE — admin shares it with the user out-of-band.
+        // First login forces a password change, so this temp value is
+        // burned after one use.
+        initialPassword: plaintextPassword,
       };
+    },
+  );
+
+  /**
+   * Admin resets another user's password. Generates a fresh temp
+   * password, requires the target to change it on next login.
+   */
+  typed.post(
+    '/users/:id/reset-password',
+    {
+      onRequest: [app.authenticate, requireRole('vendor_admin', 'company_admin')],
+      schema: { params: z.object({ id: z.coerce.number().int().positive() }) },
+    },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const target = await prisma.user.findUnique({
+        where: { id: BigInt(req.params.id) },
+      });
+      if (!target) throw ApiError.notFound();
+      if (ctx.role === 'company_admin') {
+        if (target.role === 'vendor_admin') throw ApiError.forbidden();
+        if (target.companyId !== ctx.companyId) throw ApiError.forbidden();
+      }
+
+      const plaintext = generateTempPassword();
+      await prisma.user.update({
+        where: { id: target.id },
+        data: {
+          passwordHash: await bcrypt.hash(plaintext, 12),
+          mustChangePassword: true,
+          status: 'active',
+        },
+      });
+      return { id: target.id.toString(), tempPassword: plaintext };
     },
   );
 
@@ -195,4 +242,18 @@ export default async function userRoutes(app: FastifyInstance) {
       return { teamId: teamId.toString(), userId: userId.toString() };
     },
   );
+}
+
+/**
+ * Random 10-character temp password: 4 digits + 4 letters + 2 special.
+ * Easy to read aloud, hard to brute-force.
+ */
+function generateTempPassword(): string {
+  const digits = '0123456789';
+  const letters = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz'; // no I/l/O/0
+  const symbols = '!@#$';
+  const pick = (alphabet: string, n: number) =>
+    Array.from({ length: n }, () => alphabet[randomInt(alphabet.length)]).join('');
+  const raw = pick(digits, 4) + pick(letters, 4) + pick(symbols, 2);
+  return raw.split('').sort(() => randomInt(2) - 0.5).join('');
 }

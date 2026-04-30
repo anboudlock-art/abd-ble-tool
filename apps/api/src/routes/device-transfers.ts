@@ -8,7 +8,7 @@ import {
   DeliverSchema,
   ShipToCompanySchema,
 } from '@abd/shared';
-import { getAuthContext, requireRole } from '../lib/auth.js';
+import { getAuthContext, requireRole, scopeToCompany } from '../lib/auth.js';
 import { assertTransition } from '../domain/device-state-machine.js';
 
 export default async function deviceTransferRoutes(app: FastifyInstance) {
@@ -240,8 +240,19 @@ export default async function deviceTransferRoutes(app: FastifyInstance) {
       schema: { params: z.object({ id: z.coerce.number().int().positive() }) },
     },
     async (req) => {
+      const ctx = getAuthContext(req);
+      const id = BigInt(req.params.id);
+
+      // Verify the caller can see this device before exposing its history.
+      const device = await prisma.device.findUnique({ where: { id } });
+      if (!device) throw ApiError.notFound();
+      const scope = scopeToCompany(ctx);
+      if (scope.companyId && device.ownerCompanyId !== scope.companyId) {
+        throw ApiError.forbidden();
+      }
+
       const transfers = await prisma.deviceTransfer.findMany({
-        where: { deviceId: BigInt(req.params.id) },
+        where: { deviceId: id },
         orderBy: { createdAt: 'desc' },
         take: 200,
       });

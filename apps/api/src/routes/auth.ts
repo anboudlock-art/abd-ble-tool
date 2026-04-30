@@ -3,7 +3,7 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { prisma } from '@abd/db';
-import { LoginRequestSchema, SetPasswordSchema, ApiError } from '@abd/shared';
+import { ChangePasswordSchema, LoginRequestSchema, SetPasswordSchema, ApiError } from '@abd/shared';
 import { loadConfig } from '../config.js';
 
 export default async function authRoutes(app: FastifyInstance) {
@@ -23,6 +23,7 @@ export default async function authRoutes(app: FastifyInstance) {
               name: z.string(),
               role: z.string(),
               companyId: z.string().nullable(),
+              mustChangePassword: z.boolean(),
             }),
           }),
         },
@@ -37,6 +38,11 @@ export default async function authRoutes(app: FastifyInstance) {
       const ok = await bcrypt.compare(password, user.passwordHash);
       if (!ok) throw ApiError.unauthorized('Invalid credentials');
 
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { lastLoginAt: new Date() },
+      });
+
       const accessToken = app.jwt.sign({
         sub: user.id.toString(),
         role: user.role,
@@ -50,6 +56,7 @@ export default async function authRoutes(app: FastifyInstance) {
           name: user.name,
           role: user.role,
           companyId: user.companyId?.toString() ?? null,
+          mustChangePassword: user.mustChangePassword,
         },
       };
     },
@@ -68,7 +75,32 @@ export default async function authRoutes(app: FastifyInstance) {
         phone: user.phone,
         role: user.role,
         companyId: user.companyId?.toString() ?? null,
+        mustChangePassword: user.mustChangePassword,
       };
+    },
+  );
+
+  /** Self-service password change for the logged-in user. */
+  typed.post(
+    '/auth/change-password',
+    {
+      onRequest: [app.authenticate],
+      schema: { body: ChangePasswordSchema },
+    },
+    async (req, reply) => {
+      const sub = (req.user as { sub: string }).sub;
+      const user = await prisma.user.findUnique({ where: { id: BigInt(sub) } });
+      if (!user || !user.passwordHash) throw ApiError.unauthorized();
+
+      const ok = await bcrypt.compare(req.body.oldPassword, user.passwordHash);
+      if (!ok) throw ApiError.unauthorized('Old password incorrect');
+
+      const passwordHash = await bcrypt.hash(req.body.newPassword, 12);
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash, mustChangePassword: false },
+      });
+      reply.code(204);
     },
   );
 
@@ -103,7 +135,10 @@ export default async function authRoutes(app: FastifyInstance) {
       if (!authorized) throw ApiError.unauthorized();
 
       const passwordHash = await bcrypt.hash(password, 12);
-      await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash, mustChangePassword: false, status: 'active' },
+      });
       reply.code(204);
       return;
     },

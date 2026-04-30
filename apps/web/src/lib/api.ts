@@ -167,11 +167,18 @@ export interface User {
   phone: string;
   role: string;
   companyId: string | null;
+  mustChangePassword: boolean;
 }
 
 export interface LoginResponse {
   accessToken: string;
-  user: { id: string; name: string; role: string; companyId: string | null };
+  user: {
+    id: string;
+    name: string;
+    role: string;
+    companyId: string | null;
+    mustChangePassword: boolean;
+  };
 }
 
 export interface Device {

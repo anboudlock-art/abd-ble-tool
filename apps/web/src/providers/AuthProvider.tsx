@@ -58,8 +58,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         body: { phone, password },
       });
       tokenStorage.set(resp.accessToken);
-      setUser({ ...resp.user, phone });
-      router.push('/devices');
+      const fullUser = { ...resp.user, phone };
+      setUser(fullUser);
+      router.push(fullUser.mustChangePassword ? '/change-password' : '/devices');
     },
     [router],
   );

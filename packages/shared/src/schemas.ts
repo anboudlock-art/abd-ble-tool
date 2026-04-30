@@ -90,6 +90,17 @@ export const SetPasswordSchema = z.object({
 });
 export type SetPasswordInput = z.infer<typeof SetPasswordSchema>;
 
+export const ChangePasswordSchema = z
+  .object({
+    oldPassword: z.string().min(1),
+    newPassword: z.string().min(6).max(64),
+  })
+  .refine((v) => v.oldPassword !== v.newPassword, {
+    message: '新密码不能和旧密码相同',
+    path: ['newPassword'],
+  });
+export type ChangePasswordInput = z.infer<typeof ChangePasswordSchema>;
+
 export const CreateDeviceModelSchema = z.object({
   code: z
     .string()
