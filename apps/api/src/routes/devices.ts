@@ -3,8 +3,8 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { Prisma } from '@abd/db';
 import { prisma } from '@abd/db';
-import { ApiError, DeviceListQuerySchema } from '@abd/shared';
-import { getAuthContext, scopeToCompany } from '../lib/auth.js';
+import { ApiError, CreateTestDeviceSchema, DeviceListQuerySchema } from '@abd/shared';
+import { getAuthContext, requireRole, scopeToCompany } from '../lib/auth.js';
 
 export default async function deviceRoutes(app: FastifyInstance) {
   const typed = app.withTypeProvider<ZodTypeProvider>();
@@ -228,6 +228,117 @@ export default async function deviceRoutes(app: FastifyInstance) {
         if (rows.length < PAGE) break;
       }
       return out.join('\n') + '\n';
+    },
+  );
+
+  /**
+   * Create a test device — bypasses the production-scan / ship / deliver
+   * / assign workflow and lands the device directly in `active` (or
+   * `in_warehouse` if activate=false). Vendor-admin only. Useful for
+   * testing BLE / LoRa / remote-command paths without staging a full
+   * fake batch.
+   */
+  typed.post(
+    '/devices/test-create',
+    {
+      onRequest: [app.authenticate, requireRole('vendor_admin')],
+      schema: { body: CreateTestDeviceSchema },
+    },
+    async (req, reply) => {
+      const ctx = getAuthContext(req);
+      const {
+        lockId,
+        bleMac,
+        imei,
+        modelId,
+        firmwareVersion,
+        ownerCompanyId,
+        doorLabel,
+        loraE220Addr,
+        loraChannel,
+        gatewayId,
+        activate,
+      } = req.body;
+
+      const macUpper = bleMac.toUpperCase();
+
+      const dupLock = await prisma.device.findUnique({ where: { lockId } });
+      if (dupLock) throw ApiError.conflict(`lockId ${lockId} already exists`);
+      const dupMac = await prisma.device.findUnique({ where: { bleMac: macUpper } });
+      if (dupMac) throw ApiError.conflict(`MAC ${macUpper} already in use`);
+
+      const model = await prisma.deviceModel.findUnique({ where: { id: BigInt(modelId) } });
+      if (!model) throw ApiError.notFound(`Device model ${modelId} not found`);
+
+      let companyId: bigint | null = null;
+      if (ownerCompanyId) {
+        const company = await prisma.company.findUnique({
+          where: { id: BigInt(ownerCompanyId) },
+        });
+        if (!company) throw ApiError.notFound(`Company ${ownerCompanyId} not found`);
+        companyId = company.id;
+      }
+
+      let gw: { id: bigint; companyId: bigint | null } | null = null;
+      if (gatewayId) {
+        const found = await prisma.gateway.findUnique({ where: { id: BigInt(gatewayId) } });
+        if (!found) throw ApiError.notFound(`Gateway ${gatewayId} not found`);
+        gw = { id: found.id, companyId: found.companyId };
+        if (companyId && gw.companyId && gw.companyId !== companyId) {
+          throw ApiError.conflict('Gateway belongs to a different company');
+        }
+      }
+
+      const status = activate ? 'active' : 'in_warehouse';
+      const ownerType = companyId ? 'company' : 'vendor';
+
+      const created = await prisma.$transaction(async (tx) => {
+        const d = await tx.device.create({
+          data: {
+            lockId,
+            bleMac: macUpper,
+            imei: imei ?? null,
+            modelId: model.id,
+            firmwareVersion: firmwareVersion ?? null,
+            qcStatus: 'passed',
+            producedAt: new Date(),
+            status,
+            ownerType,
+            ownerCompanyId: companyId,
+            doorLabel: doorLabel ?? null,
+            loraE220Addr: loraE220Addr ?? null,
+            loraChannel: loraChannel ?? null,
+            gatewayId: gw?.id ?? null,
+          },
+        });
+        await tx.deviceTransfer.create({
+          data: {
+            deviceId: d.id,
+            fromStatus: 'manufactured',
+            toStatus: status,
+            toOwnerType: ownerType,
+            toOwnerId: companyId,
+            operatorUserId: ctx.userId,
+            reason: 'test-create',
+            metadata: { gatewayId: gw?.id?.toString() ?? null },
+          },
+        });
+        return d;
+      });
+
+      reply.code(201);
+      return {
+        id: created.id.toString(),
+        lockId: created.lockId,
+        bleMac: created.bleMac,
+        imei: created.imei,
+        status: created.status,
+        ownerType: created.ownerType,
+        ownerCompanyId: created.ownerCompanyId?.toString() ?? null,
+        gatewayId: created.gatewayId?.toString() ?? null,
+        loraE220Addr: created.loraE220Addr,
+        loraChannel: created.loraChannel,
+      };
     },
   );
 }

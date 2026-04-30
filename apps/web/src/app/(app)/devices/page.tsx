@@ -3,7 +3,8 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Download, FileUp, Plus, Search, Truck, UsersRound } from 'lucide-react';
+import { Beaker, Download, FileUp, Plus, Search, Truck, UsersRound } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import {
   apiRequest,
   downloadFile,
@@ -19,6 +20,7 @@ import { ShipDialog } from '@/components/ShipDialog';
 import { AssignDialog } from '@/components/AssignDialog';
 import { ManualRegisterDialog } from '@/components/ManualRegisterDialog';
 import { ImportDialog } from '@/components/ImportDialog';
+import { TestDeviceDialog } from '@/components/TestDeviceDialog';
 import { useAuth } from '@/providers/AuthProvider';
 
 const STATUS_OPTIONS = [
@@ -44,7 +46,9 @@ export default function DevicesPage() {
   const [showAssignDialog, setShowAssignDialog] = useState(false);
   const [showRegisterDialog, setShowRegisterDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
+  const [showTestDialog, setShowTestDialog] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const router = useRouter();
   const pageSize = 20;
 
   const isVendor = user?.role === 'vendor_admin';
@@ -154,6 +158,11 @@ export default function DevicesPage() {
           {isVendor ? (
             <Button variant="secondary" onClick={() => setShowRegisterDialog(true)}>
               <Plus size={14} /> 手动登记
+            </Button>
+          ) : null}
+          {isVendor ? (
+            <Button variant="ghost" onClick={() => setShowTestDialog(true)}>
+              <Beaker size={14} /> 测试设备
             </Button>
           ) : null}
           {isVendor && selectedShippable.length > 0 ? (
@@ -379,6 +388,16 @@ export default function DevicesPage() {
         <ImportDialog
           onClose={() => setShowImportDialog(false)}
           onDone={() => setShowImportDialog(false)}
+        />
+      ) : null}
+
+      {showTestDialog ? (
+        <TestDeviceDialog
+          onClose={() => setShowTestDialog(false)}
+          onCreated={(id) => {
+            setShowTestDialog(false);
+            router.push(`/devices/${id}`);
+          }}
         />
       ) : null}
     </div>

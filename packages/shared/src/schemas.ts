@@ -247,3 +247,21 @@ export const CreateWebhookSubscriptionSchema = z.object({
   eventTypes: z.array(z.enum(webhookEventTypes)).min(1),
 });
 export type CreateWebhookSubscriptionInput = z.infer<typeof CreateWebhookSubscriptionSchema>;
+
+// -------------------- Test devices (skip production flow) --------------------
+
+export const CreateTestDeviceSchema = z.object({
+  lockId: z.string().regex(/^\d{8}$/),
+  bleMac: z.string().regex(/^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$/),
+  imei: z.string().regex(/^\d{15}$/).optional(),
+  modelId: z.coerce.number().int().positive(),
+  firmwareVersion: z.string().max(32).optional(),
+  ownerCompanyId: z.coerce.number().int().positive().optional(),
+  doorLabel: z.string().max(128).optional(),
+  loraE220Addr: z.coerce.number().int().min(0).max(65535).optional(),
+  loraChannel: z.coerce.number().int().min(0).max(255).optional(),
+  gatewayId: z.coerce.number().int().positive().optional(),
+  /** if true, status -> 'active'; otherwise 'in_warehouse' */
+  activate: z.boolean().default(true),
+});
+export type CreateTestDeviceInput = z.infer<typeof CreateTestDeviceSchema>;

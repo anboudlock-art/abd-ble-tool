@@ -332,6 +332,16 @@ export interface ShipResponse {
   devices: Array<{ id: string; lockId: string; status: string }>;
 }
 
+export interface GatewaySummary {
+  id: string;
+  gwId: string;
+  model: string;
+  companyId: string | null;
+  status: string;
+  online: boolean;
+  lastSeenAt: string | null;
+}
+
 export interface AssignResponse {
   assignedCount: number;
   teamId: string;
