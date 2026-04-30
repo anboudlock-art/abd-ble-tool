@@ -6,6 +6,7 @@ import {
   ApiError,
   CreateCompanySchema,
   PaginationSchema,
+  UpdateCompanySchema,
 } from '@abd/shared';
 import { getAuthContext, requireRole, scopeToCompany } from '../lib/auth.js';
 
@@ -144,6 +145,73 @@ export default async function companyRoutes(app: FastifyInstance) {
           })),
         })),
       };
+    },
+  );
+
+  typed.put(
+    '/companies/:id',
+    {
+      onRequest: [app.authenticate, requireRole('vendor_admin', 'company_admin')],
+      schema: {
+        params: z.object({ id: z.coerce.number().int().positive() }),
+        body: UpdateCompanySchema,
+      },
+    },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const id = BigInt(req.params.id);
+      if (ctx.role === 'company_admin' && ctx.companyId !== id) {
+        throw ApiError.forbidden();
+      }
+      const c = await prisma.company.findUnique({ where: { id } });
+      if (!c || c.deletedAt) throw ApiError.notFound();
+
+      // Only vendor_admin can change company status / plan / quota
+      const data: Record<string, unknown> = { ...req.body };
+      if (ctx.role !== 'vendor_admin') {
+        delete data.status;
+        delete data.maxDevices;
+      }
+
+      const updated = await prisma.company.update({
+        where: { id },
+        data: data as never,
+      });
+      return {
+        id: updated.id.toString(),
+        name: updated.name,
+        shortCode: updated.shortCode,
+        industry: updated.industry,
+        status: updated.status,
+      };
+    },
+  );
+
+  /** Soft-delete a company. Refuses if any non-deleted devices remain. */
+  typed.delete(
+    '/companies/:id',
+    {
+      onRequest: [app.authenticate, requireRole('vendor_admin')],
+      schema: { params: z.object({ id: z.coerce.number().int().positive() }) },
+    },
+    async (req, reply) => {
+      const id = BigInt(req.params.id);
+      const c = await prisma.company.findUnique({ where: { id } });
+      if (!c || c.deletedAt) throw ApiError.notFound();
+
+      const liveDevices = await prisma.device.count({
+        where: { ownerCompanyId: id, deletedAt: null },
+      });
+      if (liveDevices > 0) {
+        throw ApiError.conflict(
+          `Company still owns ${liveDevices} active device(s); transfer or retire them first`,
+        );
+      }
+      await prisma.company.update({
+        where: { id },
+        data: { deletedAt: new Date(), status: 'suspended' },
+      });
+      reply.code(204);
     },
   );
 }

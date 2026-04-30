@@ -259,6 +259,71 @@ export const CreateWebhookSubscriptionSchema = z.object({
 });
 export type CreateWebhookSubscriptionInput = z.infer<typeof CreateWebhookSubscriptionSchema>;
 
+// -------------------- Updates (PUT/PATCH) --------------------
+
+export const UpdateDeviceSchema = z.object({
+  imei: z.string().regex(/^\d{15}$/).optional().nullable(),
+  firmwareVersion: z.string().max(32).optional().nullable(),
+  hardwareVersion: z.string().max(32).optional().nullable(),
+  doorLabel: z.string().max(128).optional().nullable(),
+  notes: z.string().max(2000).optional().nullable(),
+  iccid: z.string().regex(/^\d{19,20}$/).optional().nullable(),
+  fourgMac: z
+    .string()
+    .regex(/^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$/)
+    .optional()
+    .nullable(),
+  secureChipSn: z.string().max(64).optional().nullable(),
+  loraE220Addr: z.coerce.number().int().min(0).max(65535).optional().nullable(),
+  loraChannel: z.coerce.number().int().min(0).max(255).optional().nullable(),
+  loraDevAddr: z.string().regex(/^[0-9A-Fa-f]{8}$/).optional().nullable(),
+  loraDevEui: z.string().regex(/^[0-9A-Fa-f]{16}$/).optional().nullable(),
+  loraAppKey: z.string().regex(/^[0-9A-Fa-f]{32}$/).optional().nullable(),
+  loraAppSKey: z.string().regex(/^[0-9A-Fa-f]{32}$/).optional().nullable(),
+  loraNwkSKey: z.string().regex(/^[0-9A-Fa-f]{32}$/).optional().nullable(),
+  serverIp: z.string().max(64).optional().nullable(),
+  serverPort: z.coerce.number().int().min(1).max(65535).optional().nullable(),
+  gatewayId: z.coerce.number().int().positive().optional().nullable(),
+});
+export type UpdateDeviceInput = z.infer<typeof UpdateDeviceSchema>;
+
+export const UpdateUserSchema = z.object({
+  name: z.string().min(1).max(64).optional(),
+  email: z.string().email().max(128).optional().nullable(),
+  employeeNo: z.string().max(32).optional().nullable(),
+  status: z.enum(['active', 'locked']).optional(),
+});
+export type UpdateUserInput = z.infer<typeof UpdateUserSchema>;
+
+export const UpdateCompanySchema = z.object({
+  name: z.string().min(1).max(128).optional(),
+  contactName: z.string().max(64).optional().nullable(),
+  contactPhone: z.string().regex(phoneRegex).optional().nullable(),
+  industry: z.enum(['logistics', 'security', 'other']).optional(),
+  status: z.enum(['active', 'suspended']).optional(),
+  maxDevices: z.coerce.number().int().positive().optional().nullable(),
+});
+export type UpdateCompanyInput = z.infer<typeof UpdateCompanySchema>;
+
+export const UpdateBatchSchema = z.object({
+  remark: z.string().max(2000).optional().nullable(),
+  quantity: z.coerce.number().int().positive().max(100_000).optional(),
+});
+export type UpdateBatchInput = z.infer<typeof UpdateBatchSchema>;
+
+export const UpdateDepartmentSchema = z.object({
+  name: z.string().min(1).max(128).optional(),
+  code: z.string().max(32).optional().nullable(),
+  parentId: z.coerce.number().int().positive().optional().nullable(),
+});
+export type UpdateDepartmentInput = z.infer<typeof UpdateDepartmentSchema>;
+
+export const UpdateTeamSchema = z.object({
+  name: z.string().min(1).max(128).optional(),
+  leaderUserId: z.coerce.number().int().positive().optional().nullable(),
+});
+export type UpdateTeamInput = z.infer<typeof UpdateTeamSchema>;
+
 // -------------------- Test devices (skip production flow) --------------------
 
 export const CreateTestDeviceSchema = z.object({

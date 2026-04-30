@@ -262,6 +262,15 @@ model Device {
   gatewayId          BigInt?      @map("gateway_id")
   loraE220Addr       Int?         @map("lora_e220_addr")
   loraChannel        Int?         @map("lora_channel") @db.SmallInt
+  loraDevAddr        String?      @map("lora_dev_addr") @db.VarChar(8)
+  loraDevEui         String?      @map("lora_dev_eui") @db.VarChar(16)
+  loraAppKey         String?      @map("lora_app_key") @db.VarChar(32)
+  loraAppSKey        String?      @map("lora_app_skey") @db.VarChar(32)
+  loraNwkSKey        String?      @map("lora_nwk_skey") @db.VarChar(32)
+  iccid              String?      @db.VarChar(20)
+  fourgMac           String?      @map("fourg_mac") @db.VarChar(17)
+  hardwareVersion    String?      @map("hardware_version") @db.VarChar(32)
+  secureChipSn       String?      @map("secure_chip_sn") @db.VarChar(64)
   serverIp           String?      @map("server_ip") @db.VarChar(64)
   serverPort         Int?         @map("server_port")
   notes              String?      @db.Text

@@ -3,7 +3,12 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { Prisma } from '@abd/db';
 import { prisma } from '@abd/db';
-import { ApiError, CreateTestDeviceSchema, DeviceListQuerySchema } from '@abd/shared';
+import {
+  ApiError,
+  CreateTestDeviceSchema,
+  DeviceListQuerySchema,
+  UpdateDeviceSchema,
+} from '@abd/shared';
 import { getAuthContext, requireRole, scopeToCompany } from '../lib/auth.js';
 
 export default async function deviceRoutes(app: FastifyInstance) {
@@ -341,6 +346,119 @@ export default async function deviceRoutes(app: FastifyInstance) {
       };
     },
   );
+
+  /**
+   * Edit mutable device fields. Identity (lockId, bleMac) and lifecycle
+   * (status, ownerCompanyId) are NOT editable via this route — those go
+   * through the production / ship / deliver / assign flow.
+   *
+   * Vendor admins can edit any device. Company admins can edit fields
+   * on devices their company owns. Note: Company admins cannot rotate
+   * LoRa keys (they're set at production), so we strip those.
+   */
+  typed.put(
+    '/devices/:id',
+    {
+      onRequest: [
+        app.authenticate,
+        requireRole('vendor_admin', 'company_admin'),
+      ],
+      schema: {
+        params: z.object({ id: z.coerce.number().int().positive() }),
+        body: UpdateDeviceSchema,
+      },
+    },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const id = BigInt(req.params.id);
+      const device = await prisma.device.findUnique({ where: { id } });
+      if (!device || device.deletedAt) throw ApiError.notFound();
+      const scope = scopeToCompany(ctx);
+      if (scope.companyId && device.ownerCompanyId !== scope.companyId) {
+        throw ApiError.forbidden();
+      }
+
+      const data: Record<string, unknown> = { ...req.body };
+
+      // Restrict secret rotation to vendor_admin
+      if (ctx.role !== 'vendor_admin') {
+        delete data.loraAppKey;
+        delete data.loraAppSKey;
+        delete data.loraNwkSKey;
+        delete data.secureChipSn;
+        delete data.serverIp;
+        delete data.serverPort;
+      }
+
+      // Sanity-check that gatewayId, if changed, points to an existing gateway
+      // in the right company.
+      if (data.gatewayId != null) {
+        const gw = await prisma.gateway.findUnique({
+          where: { id: BigInt(data.gatewayId as number) },
+        });
+        if (!gw) throw ApiError.notFound('Gateway not found');
+        if (
+          device.ownerCompanyId &&
+          gw.companyId &&
+          gw.companyId !== device.ownerCompanyId
+        ) {
+          throw ApiError.conflict('Gateway belongs to a different company');
+        }
+      }
+
+      const updated = await prisma.device.update({
+        where: { id },
+        data: data as never,
+      });
+
+      return {
+        id: updated.id.toString(),
+        lockId: updated.lockId,
+        bleMac: updated.bleMac,
+        imei: updated.imei,
+        firmwareVersion: updated.firmwareVersion,
+        hardwareVersion: updated.hardwareVersion,
+        doorLabel: updated.doorLabel,
+        notes: updated.notes,
+        iccid: updated.iccid,
+        fourgMac: updated.fourgMac,
+        loraE220Addr: updated.loraE220Addr,
+        loraChannel: updated.loraChannel,
+        loraDevAddr: updated.loraDevAddr,
+        loraDevEui: updated.loraDevEui,
+        gatewayId: updated.gatewayId?.toString() ?? null,
+      };
+    },
+  );
+
+  /**
+   * Soft-delete a device. Allowed only when status is in
+   * [manufactured, in_warehouse, returned, retired] — active fleet
+   * must be retired first to keep the audit story straight.
+   */
+  typed.delete(
+    '/devices/:id',
+    {
+      onRequest: [app.authenticate, requireRole('vendor_admin')],
+      schema: { params: z.object({ id: z.coerce.number().int().positive() }) },
+    },
+    async (req, reply) => {
+      const id = BigInt(req.params.id);
+      const device = await prisma.device.findUnique({ where: { id } });
+      if (!device || device.deletedAt) throw ApiError.notFound();
+      const allowed = ['manufactured', 'in_warehouse', 'returned', 'retired'];
+      if (!allowed.includes(device.status)) {
+        throw ApiError.conflict(
+          `Device must be in ${allowed.join(' / ')} (current: ${device.status})`,
+        );
+      }
+      await prisma.device.update({
+        where: { id },
+        data: { deletedAt: new Date(), status: 'retired' },
+      });
+      reply.code(204);
+    },
+  );
 }
 
 function csvEscape(v: string): string {
@@ -356,6 +474,8 @@ type DeviceWithRelations = Device & {
   currentTeam?: unknown | null;
   batch?: { batchNo: string } | null;
 };
+// (Prisma model already includes the new fields via DeviceGetPayload<>)
+
 
 function serialize(d: DeviceWithRelations) {
   return {
@@ -367,6 +487,7 @@ function serialize(d: DeviceWithRelations) {
       ? { id: d.model.id.toString(), code: d.model.code, name: d.model.name }
       : null,
     firmwareVersion: d.firmwareVersion,
+    hardwareVersion: d.hardwareVersion,
     qcStatus: d.qcStatus,
     status: d.status,
     ownerType: d.ownerType,
@@ -377,6 +498,13 @@ function serialize(d: DeviceWithRelations) {
     lastBattery: d.lastBattery,
     lastSeenAt: d.lastSeenAt?.toISOString() ?? null,
     doorLabel: d.doorLabel,
+    notes: d.notes,
+    iccid: d.iccid,
+    fourgMac: d.fourgMac,
+    loraE220Addr: d.loraE220Addr,
+    loraChannel: d.loraChannel,
+    loraDevAddr: d.loraDevAddr,
+    loraDevEui: d.loraDevEui,
     deployedAt: d.deployedAt?.toISOString() ?? null,
     batchId: d.batchId?.toString() ?? null,
     batchNo: d.batch?.batchNo ?? null,

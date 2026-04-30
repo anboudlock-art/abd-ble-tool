@@ -9,6 +9,7 @@ import {
   ApiError,
   CreateUserSchema,
   PaginationSchema,
+  UpdateUserSchema,
 } from '@abd/shared';
 import { getAuthContext, requireRole, scopeToCompany } from '../lib/auth.js';
 
@@ -240,6 +241,70 @@ export default async function userRoutes(app: FastifyInstance) {
       });
       reply.code(201);
       return { teamId: teamId.toString(), userId: userId.toString() };
+    },
+  );
+
+  /** Edit basic user attributes. Phone/role/companyId immutable here. */
+  typed.put(
+    '/users/:id',
+    {
+      onRequest: [app.authenticate, requireRole('vendor_admin', 'company_admin')],
+      schema: {
+        params: z.object({ id: z.coerce.number().int().positive() }),
+        body: UpdateUserSchema,
+      },
+    },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const id = BigInt(req.params.id);
+      const target = await prisma.user.findUnique({ where: { id } });
+      if (!target || target.deletedAt) throw ApiError.notFound();
+
+      if (ctx.role === 'company_admin') {
+        if (target.role === 'vendor_admin') throw ApiError.forbidden();
+        if (target.companyId !== ctx.companyId) throw ApiError.forbidden();
+      }
+
+      const updated = await prisma.user.update({
+        where: { id },
+        data: req.body as never,
+      });
+      return {
+        id: updated.id.toString(),
+        name: updated.name,
+        phone: updated.phone,
+        email: updated.email,
+        employeeNo: updated.employeeNo,
+        status: updated.status,
+        role: updated.role,
+      };
+    },
+  );
+
+  typed.delete(
+    '/users/:id',
+    {
+      onRequest: [app.authenticate, requireRole('vendor_admin', 'company_admin')],
+      schema: { params: z.object({ id: z.coerce.number().int().positive() }) },
+    },
+    async (req, reply) => {
+      const ctx = getAuthContext(req);
+      const id = BigInt(req.params.id);
+      if (id === ctx.userId) throw ApiError.conflict('Cannot delete self');
+
+      const target = await prisma.user.findUnique({ where: { id } });
+      if (!target || target.deletedAt) throw ApiError.notFound();
+
+      if (ctx.role === 'company_admin') {
+        if (target.role === 'vendor_admin') throw ApiError.forbidden();
+        if (target.companyId !== ctx.companyId) throw ApiError.forbidden();
+      }
+
+      await prisma.user.update({
+        where: { id },
+        data: { deletedAt: new Date(), status: 'locked' },
+      });
+      reply.code(204);
     },
   );
 }

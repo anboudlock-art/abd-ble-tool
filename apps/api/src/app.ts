@@ -8,6 +8,7 @@ import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod
 import { loadConfig } from './config.js';
 import authPlugin from './middlewares/auth.js';
 import errorHandlerPlugin from './middlewares/error-handler.js';
+import auditPlugin from './middlewares/audit-log.js';
 import healthRoutes from './routes/health.js';
 import authRoutes from './routes/auth.js';
 import deviceModelRoutes from './routes/device-models.js';
@@ -52,6 +53,7 @@ export async function buildApp() {
   });
   await app.register(errorHandlerPlugin);
   await app.register(authPlugin);
+  await app.register(auditPlugin);
 
   await app.register(healthRoutes);
   await app.register(authRoutes, { prefix: '/api/v1' });

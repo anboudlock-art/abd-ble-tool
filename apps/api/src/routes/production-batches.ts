@@ -2,7 +2,12 @@ import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { prisma } from '@abd/db';
-import { ApiError, CreateBatchSchema, PaginationSchema } from '@abd/shared';
+import {
+  ApiError,
+  CreateBatchSchema,
+  PaginationSchema,
+  UpdateBatchSchema,
+} from '@abd/shared';
 import { getAuthContext, requireRole } from '../lib/auth.js';
 
 export default async function productionBatchRoutes(app: FastifyInstance) {
@@ -79,6 +84,66 @@ export default async function productionBatchRoutes(app: FastifyInstance) {
       });
       if (!batch) throw ApiError.notFound();
       return serialize(batch);
+    },
+  );
+
+  typed.put(
+    '/production/batches/:id',
+    {
+      onRequest: [app.authenticate, requireRole('vendor_admin')],
+      schema: {
+        params: z.object({ id: z.coerce.number().int().positive() }),
+        body: UpdateBatchSchema,
+      },
+    },
+    async (req) => {
+      const id = BigInt(req.params.id);
+      const b = await prisma.productionBatch.findUnique({ where: { id } });
+      if (!b) throw ApiError.notFound();
+
+      // Refuse shrinking below already-produced count
+      if (req.body.quantity != null && req.body.quantity < b.producedCount) {
+        throw ApiError.conflict(
+          `quantity (${req.body.quantity}) cannot be less than already-produced count (${b.producedCount})`,
+        );
+      }
+
+      const updated = await prisma.productionBatch.update({
+        where: { id },
+        data: { remark: req.body.remark, quantity: req.body.quantity },
+        include: {
+          model: true,
+          _count: { select: { devices: true, scans: true } },
+        },
+      });
+      return serialize(updated);
+    },
+  );
+
+  typed.delete(
+    '/production/batches/:id',
+    {
+      onRequest: [app.authenticate, requireRole('vendor_admin')],
+      schema: { params: z.object({ id: z.coerce.number().int().positive() }) },
+    },
+    async (req, reply) => {
+      const id = BigInt(req.params.id);
+      const b = await prisma.productionBatch.findUnique({
+        where: { id },
+        include: { _count: { select: { devices: true, scans: true } } },
+      });
+      if (!b) throw ApiError.notFound();
+      if (b._count.devices > 0) {
+        throw ApiError.conflict(
+          `Batch has ${b._count.devices} device(s); reassign or delete them first`,
+        );
+      }
+      // Delete dependent scans first if any
+      if (b._count.scans > 0) {
+        await prisma.productionScan.deleteMany({ where: { batchId: id } });
+      }
+      await prisma.productionBatch.delete({ where: { id } });
+      reply.code(204);
     },
   );
 }

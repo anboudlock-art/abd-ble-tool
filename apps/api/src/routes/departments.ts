@@ -2,11 +2,64 @@ import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { prisma } from '@abd/db';
-import { ApiError, CreateDepartmentSchema, CreateTeamSchema } from '@abd/shared';
+import {
+  ApiError,
+  CreateDepartmentSchema,
+  CreateTeamSchema,
+  UpdateDepartmentSchema,
+  UpdateTeamSchema,
+} from '@abd/shared';
 import { getAuthContext, requireRole, scopeToCompany } from '../lib/auth.js';
 
 export default async function departmentRoutes(app: FastifyInstance) {
   const typed = app.withTypeProvider<ZodTypeProvider>();
+
+  typed.get(
+    '/departments',
+    {
+      onRequest: [app.authenticate],
+      schema: {
+        querystring: z.object({
+          companyId: z.coerce.number().int().positive().optional(),
+        }),
+      },
+    },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const scope = scopeToCompany(ctx);
+      const companyId = scope.companyId
+        ? scope.companyId
+        : req.query.companyId
+          ? BigInt(req.query.companyId)
+          : undefined;
+      if (!companyId) throw ApiError.conflict('companyId required');
+
+      const items = await prisma.department.findMany({
+        where: { companyId, deletedAt: null },
+        include: {
+          teams: {
+            where: { deletedAt: null },
+            include: { _count: { select: { memberships: true } } },
+          },
+        },
+        orderBy: { id: 'asc' },
+      });
+      return {
+        items: items.map((d) => ({
+          id: d.id.toString(),
+          name: d.name,
+          code: d.code,
+          parentId: d.parentId?.toString() ?? null,
+          teams: d.teams.map((t) => ({
+            id: t.id.toString(),
+            name: t.name,
+            leaderUserId: t.leaderUserId?.toString() ?? null,
+            memberCount: t._count.memberships,
+          })),
+        })),
+      };
+    },
+  );
 
   typed.post(
     '/departments',
@@ -116,6 +169,157 @@ export default async function departmentRoutes(app: FastifyInstance) {
         })),
         deviceCount: team._count.devices,
       };
+    },
+  );
+
+  typed.put(
+    '/departments/:id',
+    {
+      onRequest: [app.authenticate, requireRole('vendor_admin', 'company_admin')],
+      schema: {
+        params: z.object({ id: z.coerce.number().int().positive() }),
+        body: UpdateDepartmentSchema,
+      },
+    },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const id = BigInt(req.params.id);
+      const d = await prisma.department.findUnique({ where: { id } });
+      if (!d || d.deletedAt) throw ApiError.notFound();
+      const scope = scopeToCompany(ctx);
+      if (scope.companyId && scope.companyId !== d.companyId) throw ApiError.forbidden();
+
+      // Validate parent if changing
+      if (req.body.parentId != null) {
+        const parent = await prisma.department.findUnique({
+          where: { id: BigInt(req.body.parentId) },
+        });
+        if (!parent || parent.companyId !== d.companyId) {
+          throw ApiError.conflict('parentId must belong to the same company');
+        }
+        if (BigInt(req.body.parentId) === id) {
+          throw ApiError.conflict('Cannot set self as parent');
+        }
+      }
+
+      const updated = await prisma.department.update({
+        where: { id },
+        data: {
+          name: req.body.name,
+          code: req.body.code,
+          parentId: req.body.parentId != null ? BigInt(req.body.parentId) : undefined,
+        },
+      });
+      return {
+        id: updated.id.toString(),
+        name: updated.name,
+        code: updated.code,
+        parentId: updated.parentId?.toString() ?? null,
+      };
+    },
+  );
+
+  typed.delete(
+    '/departments/:id',
+    {
+      onRequest: [app.authenticate, requireRole('vendor_admin', 'company_admin')],
+      schema: { params: z.object({ id: z.coerce.number().int().positive() }) },
+    },
+    async (req, reply) => {
+      const ctx = getAuthContext(req);
+      const id = BigInt(req.params.id);
+      const d = await prisma.department.findUnique({ where: { id } });
+      if (!d || d.deletedAt) throw ApiError.notFound();
+      const scope = scopeToCompany(ctx);
+      if (scope.companyId && scope.companyId !== d.companyId) throw ApiError.forbidden();
+
+      const teamCount = await prisma.team.count({ where: { departmentId: id, deletedAt: null } });
+      if (teamCount > 0) {
+        throw ApiError.conflict(`Department still has ${teamCount} team(s); delete them first`);
+      }
+      const childCount = await prisma.department.count({
+        where: { parentId: id, deletedAt: null },
+      });
+      if (childCount > 0) {
+        throw ApiError.conflict(`Department has ${childCount} sub-department(s)`);
+      }
+      await prisma.department.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
+      reply.code(204);
+    },
+  );
+
+  typed.put(
+    '/teams/:id',
+    {
+      onRequest: [app.authenticate, requireRole('vendor_admin', 'company_admin', 'dept_admin')],
+      schema: {
+        params: z.object({ id: z.coerce.number().int().positive() }),
+        body: UpdateTeamSchema,
+      },
+    },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const id = BigInt(req.params.id);
+      const t = await prisma.team.findUnique({ where: { id } });
+      if (!t || t.deletedAt) throw ApiError.notFound();
+      const scope = scopeToCompany(ctx);
+      if (scope.companyId && scope.companyId !== t.companyId) throw ApiError.forbidden();
+
+      if (req.body.leaderUserId != null) {
+        const leader = await prisma.user.findUnique({
+          where: { id: BigInt(req.body.leaderUserId) },
+        });
+        if (!leader || leader.companyId !== t.companyId) {
+          throw ApiError.conflict('leader must be in the same company');
+        }
+      }
+
+      const updated = await prisma.team.update({
+        where: { id },
+        data: {
+          name: req.body.name,
+          leaderUserId:
+            req.body.leaderUserId !== undefined
+              ? req.body.leaderUserId != null
+                ? BigInt(req.body.leaderUserId)
+                : null
+              : undefined,
+        },
+      });
+      return {
+        id: updated.id.toString(),
+        name: updated.name,
+        leaderUserId: updated.leaderUserId?.toString() ?? null,
+      };
+    },
+  );
+
+  typed.delete(
+    '/teams/:id',
+    {
+      onRequest: [app.authenticate, requireRole('vendor_admin', 'company_admin', 'dept_admin')],
+      schema: { params: z.object({ id: z.coerce.number().int().positive() }) },
+    },
+    async (req, reply) => {
+      const ctx = getAuthContext(req);
+      const id = BigInt(req.params.id);
+      const t = await prisma.team.findUnique({ where: { id } });
+      if (!t || t.deletedAt) throw ApiError.notFound();
+      const scope = scopeToCompany(ctx);
+      if (scope.companyId && scope.companyId !== t.companyId) throw ApiError.forbidden();
+
+      const deviceCount = await prisma.device.count({ where: { currentTeamId: id, deletedAt: null } });
+      if (deviceCount > 0) {
+        throw ApiError.conflict(`Team still owns ${deviceCount} device(s); reassign first`);
+      }
+      await prisma.team.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
+      reply.code(204);
     },
   );
 }
