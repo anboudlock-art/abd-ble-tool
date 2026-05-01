@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { AlertTriangle, Boxes, Building2, ClipboardList, Clock3, Cpu, Hash, KeyRound, LayoutDashboard, Lock, LogOut, Plug, Radio, ShieldCheck, UsersRound, Wrench } from 'lucide-react';
+import { AlertTriangle, Boxes, Building2, ClipboardList, Clock3, Cpu, Factory, Hash, KeyRound, LayoutDashboard, ListChecks, Lock, LogOut, Plug, Radio, ShieldCheck, UsersRound, Wrench } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -15,7 +15,19 @@ interface NavItem {
 
 const items: NavItem[] = [
   { href: '/dashboard', label: '概览', icon: LayoutDashboard },
+  {
+    href: '/warehouses',
+    label: '三库总览',
+    icon: Factory,
+    roles: ['vendor_admin'],
+  },
   { href: '/devices', label: '设备', icon: Lock },
+  {
+    href: '/authorizations',
+    label: '授权管理',
+    icon: ListChecks,
+    roles: ['vendor_admin', 'company_admin', 'dept_admin'],
+  },
   { href: '/alarms', label: '告警', icon: AlertTriangle },
   {
     href: '/permission-approvals',

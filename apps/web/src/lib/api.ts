@@ -711,3 +711,30 @@ export interface DeviceRepairListResp {
   page: number;
   pageSize: number;
 }
+
+// ----- v2.6 Authorizations (long-lived assignments) -----
+
+export interface Authorization {
+  id: string;
+  deviceId: string;
+  lockId: string;
+  doorLabel: string | null;
+  scope: 'company' | 'team' | 'user';
+  teamId: string | null;
+  teamName: string | null;
+  userId: string | null;
+  userName: string | null;
+  userPhone: string | null;
+  validFrom: string | null;
+  validUntil: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+  state: 'active' | 'expiring' | 'expired' | 'revoked';
+}
+
+export interface AuthorizationListResp {
+  items: Authorization[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
