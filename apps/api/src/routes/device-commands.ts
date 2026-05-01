@@ -212,6 +212,69 @@ export default async function deviceCommandRoutes(app: FastifyInstance) {
     },
   );
 
+  /**
+   * APP-style alias: deviceId travels in the body. Calls into the same
+   * handler as POST /devices/:id/commands. Adds `command` as an alternative
+   * spelling to `commandType` since the v2.6 spec writes it that way.
+   */
+  typed.post(
+    '/device-commands',
+    {
+      onRequest: [app.authenticate],
+      schema: {
+        body: z.object({
+          deviceId: z.coerce.number().int().positive(),
+          commandType: z.enum(['unlock', 'lock', 'query_status']).optional(),
+          command: z.enum(['unlock', 'lock', 'query_status']).optional(),
+        }),
+      },
+    },
+    async (req, reply) => {
+      const { deviceId, commandType, command } = req.body;
+      const ct = commandType ?? command;
+      if (!ct) throw ApiError.conflict('commandType (or command) is required');
+      const inner = await app.inject({
+        method: 'POST',
+        url: `/api/v1/devices/${deviceId}/commands`,
+        headers: { authorization: req.headers.authorization ?? '' },
+        payload: { commandType: ct },
+      });
+      reply.code(inner.statusCode);
+      return JSON.parse(inner.body);
+    },
+  );
+
+  /** Path alias: /device-commands/:id → /commands/:id */
+  typed.get(
+    '/device-commands/:id',
+    {
+      onRequest: [app.authenticate],
+      schema: { params: z.object({ id: z.coerce.number().int().positive() }) },
+    },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const cmd = await prisma.deviceCommand.findUnique({
+        where: { id: BigInt(req.params.id) },
+        include: { device: true },
+      });
+      if (!cmd) throw ApiError.notFound();
+      const scope = scopeToCompany(ctx);
+      if (scope.companyId && cmd.device.ownerCompanyId !== scope.companyId) {
+        throw ApiError.forbidden();
+      }
+      return {
+        id: cmd.id.toString(),
+        deviceId: cmd.deviceId.toString(),
+        commandType: cmd.commandType,
+        status: cmd.status,
+        sentAt: cmd.sentAt?.toISOString() ?? null,
+        ackedAt: cmd.ackedAt?.toISOString() ?? null,
+        timeoutAt: cmd.timeoutAt?.toISOString() ?? null,
+        errorMessage: cmd.errorMessage,
+      };
+    },
+  );
+
   typed.get(
     '/commands/:id',
     {

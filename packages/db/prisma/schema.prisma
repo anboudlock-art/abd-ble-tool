@@ -54,6 +54,9 @@ model Company {
   devices        Device[]
   gateways       Gateway[]
   integrationApps IntegrationApp[]
+  permissionRequests PermissionRequest[]
+  temporaryUnlocks TemporaryUnlock[]
+  repairsFromHere DeviceRepair[] @relation("RepairSourceCompany")
 
   @@index([status])
   @@map("company")
@@ -143,6 +146,8 @@ model User {
   assignmentsGranted DeviceAssignment[] @relation("AssignmentGranter")
   assignmentsReceived DeviceAssignment[] @relation("AssignmentReceiver")
   auditLogs       AuditLog[]
+  permissionRequests PermissionRequest[] @relation("PermissionRequestApplicant")
+  temporaryUnlocks   TemporaryUnlock[]   @relation("TemporaryUnlockApplicant")
 
   @@index([companyId])
   @@index([role])
@@ -214,6 +219,7 @@ enum DeviceStatus {
   delivered
   assigned
   active
+  repairing
   returned
   retired
 }
@@ -290,6 +296,9 @@ model Device {
   events             LockEvent[]
   commands           DeviceCommand[]
   productionScans    ProductionScan[]
+  repairs            DeviceRepair[]
+  permissionItems    PermissionRequestItem[]
+  temporaryUnlocks   TemporaryUnlock[]
 
   @@index([status])
   @@index([ownerCompanyId, status])
@@ -318,6 +327,7 @@ model ProductionBatch {
   model          DeviceModel @relation(fields: [modelId], references: [id])
   devices        Device[]
   scans          ProductionScan[]
+  lockNumbers    LockNumber[]
 
   @@map("production_batch")
 }
@@ -832,4 +842,193 @@ model DeviceFirmwareTask {
   @@index([deviceId, createdAt(sort: Desc)])
   @@index([status])
   @@map("device_firmware_task")
+}
+
+// ============================================================
+// Lock numbers (pre-generated before manufacturing)
+// ============================================================
+
+enum LockNumberStatus {
+  reserved
+  registered
+  voided
+}
+
+/// Pre-generated lock IDs printed on QR labels and stuck to the lock body.
+/// Created by vendor_admin in batches; each row tracks whether it's still
+/// "reserved" (label printed but no device registered yet), "registered"
+/// (a device has bound to it), or "voided" (label spoiled).
+model LockNumber {
+  id          BigInt           @id @default(autoincrement())
+  lockId      String           @unique @map("lock_id") @db.VarChar(32)
+  /// The production batch this lock number belongs to.
+  batchId     BigInt           @map("batch_id")
+  status      LockNumberStatus @default(reserved)
+  /// Filled in once a device row is created against this lock id.
+  deviceId    BigInt?          @unique @map("device_id")
+  voidReason  String?          @map("void_reason") @db.VarChar(128)
+  generatedByUserId BigInt?    @map("generated_by_user_id")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  registeredAt DateTime?       @map("registered_at")
+
+  batch       ProductionBatch  @relation(fields: [batchId], references: [id])
+
+  @@index([batchId])
+  @@index([status])
+  @@map("lock_number")
+}
+
+// ============================================================
+// Device repair flow
+// ============================================================
+
+enum RepairStatus {
+  intake
+  diagnosing
+  repairing
+  awaiting_parts
+  repaired
+  irreparable
+  returned
+}
+
+/// One row per (device, intake event). Created when a device is moved into
+/// the repair pool, closed when it's repaired and ready to ship back.
+model DeviceRepair {
+  id                 BigInt       @id @default(autoincrement())
+  ulid               String       @unique @default(cuid())
+  deviceId           BigInt       @map("device_id")
+  /// The company the device was returned from (so we know who to ship back to).
+  sourceCompanyId    BigInt?      @map("source_company_id")
+  /// The status the device had right before entering repair, so we can
+  /// restore it on close-out.
+  priorStatus        DeviceStatus @map("prior_status")
+  faultReason        String       @map("fault_reason") @db.VarChar(255)
+  status             RepairStatus @default(intake)
+  intakeByUserId     BigInt?      @map("intake_by_user_id")
+  repairedByUserId   BigInt?      @map("repaired_by_user_id")
+  notes              String?      @db.Text
+  partsReplaced      Json?        @map("parts_replaced")
+  intakeAt           DateTime     @default(now()) @map("intake_at")
+  repairedAt         DateTime?    @map("repaired_at")
+  closedAt           DateTime?    @map("closed_at")
+
+  device             Device       @relation(fields: [deviceId], references: [id])
+  sourceCompany      Company?     @relation("RepairSourceCompany", fields: [sourceCompanyId], references: [id])
+
+  @@index([deviceId, intakeAt(sort: Desc)])
+  @@index([status])
+  @@index([sourceCompanyId])
+  @@map("device_repair")
+}
+
+// ============================================================
+// Long-term unlock permission requests (multi-device, partial-approval)
+// ============================================================
+
+enum PermissionRequestStatus {
+  pending
+  approved
+  partial
+  rejected
+  cancelled
+}
+
+enum PermissionRequestItemStatus {
+  pending
+  approved
+  rejected
+}
+
+/// Member applies for unlock rights on N devices. Approver can approve some,
+/// reject some — overall status becomes `partial` if mixed, `approved` if
+/// all granted, `rejected` if all denied.
+model PermissionRequest {
+  id              BigInt                  @id @default(autoincrement())
+  ulid            String                  @unique @default(cuid())
+  applicantUserId BigInt                  @map("applicant_user_id")
+  companyId       BigInt                  @map("company_id")
+  reason          String                  @db.VarChar(500)
+  /// Optional time window the requester is asking for; can be null = forever.
+  validFrom       DateTime?               @map("valid_from")
+  validUntil      DateTime?               @map("valid_until")
+  status          PermissionRequestStatus @default(pending)
+  decidedByUserId BigInt?                 @map("decided_by_user_id")
+  decidedAt       DateTime?               @map("decided_at")
+  decisionNote    String?                 @map("decision_note") @db.VarChar(500)
+  createdAt       DateTime                @default(now()) @map("created_at")
+  updatedAt       DateTime                @updatedAt @map("updated_at")
+
+  applicant       User                    @relation("PermissionRequestApplicant", fields: [applicantUserId], references: [id])
+  company         Company                 @relation(fields: [companyId], references: [id])
+  items           PermissionRequestItem[]
+
+  @@index([companyId, status, createdAt(sort: Desc)])
+  @@index([applicantUserId, createdAt(sort: Desc)])
+  @@map("permission_request")
+}
+
+model PermissionRequestItem {
+  id            BigInt                      @id @default(autoincrement())
+  requestId     BigInt                      @map("request_id")
+  deviceId      BigInt                      @map("device_id")
+  status        PermissionRequestItemStatus @default(pending)
+  /// If approved, the device_assignment row that was created so we can
+  /// revoke it later if the request is cancelled or expires.
+  assignmentId  BigInt?                     @map("assignment_id")
+
+  request       PermissionRequest           @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  device        Device                      @relation(fields: [deviceId], references: [id])
+
+  @@unique([requestId, deviceId])
+  @@index([deviceId])
+  @@map("permission_request_item")
+}
+
+// ============================================================
+// Temporary unlock (single device, short window, "emergency" priority)
+// ============================================================
+
+enum TemporaryUnlockStatus {
+  pending
+  approved
+  rejected
+  expired
+  revoked
+  cancelled
+}
+
+/// Single-device, time-bounded unlock request. Window is one of 1h / 2h / 4h
+/// / 8h. `emergency` flag bumps the request to the top of the approval queue
+/// and (if SMS is configured) pages approvers immediately.
+model TemporaryUnlock {
+  id              BigInt                @id @default(autoincrement())
+  ulid            String                @unique @default(cuid())
+  applicantUserId BigInt                @map("applicant_user_id")
+  companyId       BigInt                @map("company_id")
+  deviceId        BigInt                @map("device_id")
+  reason          String                @db.VarChar(500)
+  /// Window length in minutes (60, 120, 240, 480).
+  durationMinutes Int                   @map("duration_minutes")
+  emergency       Boolean               @default(false)
+  status          TemporaryUnlockStatus @default(pending)
+  /// When approved, validUntil = approvedAt + durationMinutes.
+  approvedAt      DateTime?             @map("approved_at")
+  validUntil      DateTime?             @map("valid_until")
+  decidedByUserId BigInt?               @map("decided_by_user_id")
+  decisionNote    String?               @map("decision_note") @db.VarChar(500)
+  /// The device_assignment row created on approval; revoked when the window
+  /// closes or when a manager calls /revoke.
+  assignmentId    BigInt?               @map("assignment_id")
+  createdAt       DateTime              @default(now()) @map("created_at")
+  updatedAt       DateTime              @updatedAt @map("updated_at")
+
+  applicant       User                  @relation("TemporaryUnlockApplicant", fields: [applicantUserId], references: [id])
+  company         Company               @relation(fields: [companyId], references: [id])
+  device          Device                @relation(fields: [deviceId], references: [id])
+
+  @@index([companyId, status, emergency, createdAt(sort: Desc)])
+  @@index([applicantUserId, createdAt(sort: Desc)])
+  @@index([validUntil])
+  @@map("temporary_unlock")
 }

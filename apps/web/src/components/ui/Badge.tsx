@@ -43,6 +43,8 @@ export function deviceStatusTone(status: string): Tone {
       return 'purple';
     case 'active':
       return 'green';
+    case 'repairing':
+      return 'amber';
     case 'returned':
       return 'amber';
     case 'retired':
@@ -59,6 +61,7 @@ export const deviceStatusLabel: Record<string, string> = {
   delivered: '已签收',
   assigned: '已分配',
   active: '在用',
+  repairing: '维修中',
   returned: '已回收',
   retired: '已报废',
 };

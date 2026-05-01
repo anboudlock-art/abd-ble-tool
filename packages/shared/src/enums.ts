@@ -24,6 +24,7 @@ export const DeviceStatus = {
   delivered: 'delivered',
   assigned: 'assigned',
   active: 'active',
+  repairing: 'repairing',
   returned: 'returned',
   retired: 'retired',
 } as const;

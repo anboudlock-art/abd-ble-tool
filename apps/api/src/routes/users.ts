@@ -16,6 +16,172 @@ import { getAuthContext, requireRole, scopeToCompany } from '../lib/auth.js';
 export default async function userRoutes(app: FastifyInstance) {
   const typed = app.withTypeProvider<ZodTypeProvider>();
 
+  // ----- /users/me family (APP convenience) -------------------------------
+
+  /** Current user + role + company. Companion to /auth/me but lives under
+   *  /users so the APP can keep all its calls under one prefix. */
+  typed.get(
+    '/users/me',
+    { onRequest: [app.authenticate] },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const u = await prisma.user.findUnique({
+        where: { id: ctx.userId },
+        include: {
+          company: { select: { id: true, name: true } },
+          memberships: {
+            include: { team: { select: { id: true, name: true } } },
+          },
+        },
+      });
+      if (!u || u.deletedAt) throw ApiError.notFound();
+      return {
+        id: u.id.toString(),
+        name: u.name,
+        phone: u.phone,
+        email: u.email,
+        role: u.role,
+        status: u.status,
+        mustChangePassword: u.mustChangePassword,
+        companyId: u.companyId?.toString() ?? null,
+        companyName: u.company?.name ?? null,
+        teams: u.memberships.map((m) => ({
+          id: m.teamId.toString(),
+          name: m.team.name,
+          roleInTeam: m.roleInTeam,
+        })),
+      };
+    },
+  );
+
+  /** Devices the current user can open: union of user-scoped grants and the
+   *  team-scoped grants of every team they belong to. */
+  typed.get(
+    '/users/me/devices',
+    { onRequest: [app.authenticate] },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const memberships = await prisma.userMembership.findMany({
+        where: { userId: ctx.userId },
+        select: { teamId: true },
+      });
+      const teamIds = memberships.map((m) => m.teamId);
+      const now = new Date();
+
+      const assignments = await prisma.deviceAssignment.findMany({
+        where: {
+          revokedAt: null,
+          AND: [
+            { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
+            { OR: [{ validUntil: null }, { validUntil: { gt: now } }] },
+          ],
+          OR: [
+            { scope: 'user', userId: ctx.userId },
+            ...(teamIds.length
+              ? [{ scope: 'team' as const, teamId: { in: teamIds } }]
+              : []),
+          ],
+        },
+        orderBy: { id: 'desc' },
+        include: {
+          device: {
+            select: {
+              id: true,
+              lockId: true,
+              bleMac: true,
+              status: true,
+              lastState: true,
+              lastBattery: true,
+              lastSeenAt: true,
+              doorLabel: true,
+              modelId: true,
+            },
+          },
+          team: { select: { id: true, name: true } },
+        },
+      });
+
+      // De-dupe by deviceId; user-scoped grants win over team-scoped.
+      const byDeviceId = new Map<string, (typeof assignments)[number]>();
+      for (const a of assignments) {
+        const k = a.device.id.toString();
+        const existing = byDeviceId.get(k);
+        if (!existing || (a.scope === 'user' && existing.scope !== 'user')) {
+          byDeviceId.set(k, a);
+        }
+      }
+
+      return {
+        items: Array.from(byDeviceId.values()).map((a) => ({
+          deviceId: a.device.id.toString(),
+          lockId: a.device.lockId,
+          bleMac: a.device.bleMac,
+          status: a.device.status,
+          lastState: a.device.lastState,
+          lastBattery: a.device.lastBattery,
+          lastSeenAt: a.device.lastSeenAt?.toISOString() ?? null,
+          doorLabel: a.device.doorLabel,
+          assignmentScope: a.scope,
+          teamId: a.team?.id.toString() ?? null,
+          teamName: a.team?.name ?? null,
+          validUntil: a.validUntil?.toISOString() ?? null,
+        })),
+      };
+    },
+  );
+
+  /** Notifications for the current user. Same shape as /notifications but
+   *  scoped explicitly under /users/me to fit the v2.6 APP API plan. */
+  typed.get(
+    '/users/me/notifications',
+    {
+      onRequest: [app.authenticate],
+      schema: {
+        querystring: z.object({
+          page: z.coerce.number().int().min(1).default(1),
+          pageSize: z.coerce.number().int().min(1).max(100).default(20),
+          unreadOnly: z.coerce.boolean().default(false),
+        }),
+      },
+    },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const { page, pageSize, unreadOnly } = req.query;
+      const where = {
+        userId: ctx.userId,
+        ...(unreadOnly ? { readAt: null } : {}),
+      };
+      const [items, total, unreadCount] = await Promise.all([
+        prisma.notification.findMany({
+          where,
+          orderBy: { createdAt: 'desc' },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+        prisma.notification.count({ where }),
+        prisma.notification.count({ where: { userId: ctx.userId, readAt: null } }),
+      ]);
+      return {
+        items: items.map((n) => ({
+          id: n.id.toString(),
+          kind: n.kind,
+          title: n.title,
+          body: n.body,
+          link: n.link,
+          payload: n.payload,
+          readAt: n.readAt?.toISOString() ?? null,
+          createdAt: n.createdAt.toISOString(),
+        })),
+        total,
+        unreadCount,
+        page,
+        pageSize,
+      };
+    },
+  );
+
+  // ------------------------------------------------------------------------
+
   typed.get(
     '/users',
     {

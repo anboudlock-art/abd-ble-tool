@@ -200,6 +200,46 @@ export default async function productionBatchRoutes(app: FastifyInstance) {
       return serialize(updated);
     },
   );
+
+  /**
+   * A2: list pre-generated lock numbers in a batch — used by the APP
+   * to drive the "scan QR → confirm" registration flow, and by the PC
+   * end to render the printable label list.
+   */
+  typed.get(
+    '/production-batches/:id/lock-numbers',
+    {
+      onRequest: [app.authenticate],
+      schema: {
+        params: z.object({ id: z.coerce.number().int().positive() }),
+        querystring: z.object({
+          status: z.enum(['reserved', 'registered', 'voided']).optional(),
+        }),
+      },
+    },
+    async (req) => {
+      const id = BigInt(req.params.id);
+      const b = await prisma.productionBatch.findUnique({ where: { id } });
+      if (!b) throw ApiError.notFound('Batch not found');
+      const items = await prisma.lockNumber.findMany({
+        where: { batchId: id, ...(req.query.status ? { status: req.query.status } : {}) },
+        orderBy: { lockId: 'asc' },
+      });
+      return {
+        batchId: b.id.toString(),
+        batchNo: b.batchNo,
+        items: items.map((ln) => ({
+          id: ln.id.toString(),
+          lockId: ln.lockId,
+          status: ln.status,
+          deviceId: ln.deviceId?.toString() ?? null,
+          createdAt: ln.createdAt.toISOString(),
+          registeredAt: ln.registeredAt?.toISOString() ?? null,
+        })),
+        total: items.length,
+      };
+    },
+  );
 }
 
 type BatchWithRelations = Awaited<ReturnType<typeof prisma.productionBatch.findMany>>[number] & {

@@ -7,13 +7,17 @@ import { ApiError } from '@abd/shared';
  * Terminal state: `retired` (no outgoing edges).
  */
 const TRANSITIONS: Record<DeviceStatus, readonly DeviceStatus[]> = {
-  manufactured: ['in_warehouse'],
-  in_warehouse: ['shipped', 'retired'],
+  manufactured: ['in_warehouse', 'repairing'],
+  in_warehouse: ['shipped', 'repairing', 'retired'],
   shipped: ['delivered', 'in_warehouse'], // allow recall
-  delivered: ['assigned', 'returned'],
-  assigned: ['active', 'delivered'], // allow unassign back to company pool
-  active: ['active', 'returned'], // idempotent for re-deploy; returned for RMA
-  returned: ['in_warehouse', 'retired'],
+  delivered: ['assigned', 'returned', 'repairing'],
+  assigned: ['active', 'delivered', 'repairing'], // allow unassign or RMA
+  active: ['active', 'returned', 'repairing'], // idempotent for re-deploy; returned for RMA
+  // After repair, device returns to its prior status (handled by device-repair
+  // route by reading prior_status); the state machine just enumerates the
+  // closeout edges that are reachable.
+  repairing: ['manufactured', 'in_warehouse', 'delivered', 'assigned', 'active', 'retired'],
+  returned: ['in_warehouse', 'repairing', 'retired'],
   retired: [],
 };
 
