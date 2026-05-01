@@ -129,6 +129,9 @@ export default function DeviceDetailPage({
             <Item label="归属">
               {d.ownerCompanyName ?? (d.ownerType === 'vendor' ? '厂商' : '—')}
             </Item>
+            <Item label="当前班组">
+              {d.currentTeamName ?? '—'}
+            </Item>
             <Item label="电量">
               {d.lastBattery !== null ? `${d.lastBattery}%` : '—'}
             </Item>

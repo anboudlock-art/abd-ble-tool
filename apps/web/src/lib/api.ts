@@ -83,8 +83,9 @@ async function tryRefresh(): Promise<string | null> {
   return refreshInFlight;
 }
 
-const baseUrl =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3001';
+// 当 NEXT_PUBLIC_API_BASE_URL 未设置或为空时，使用空字符串（走相对路径通过 Nginx 反代）
+// 绝不 fallback 到 localhost，因为 localhost 在浏览器端指向用户本地机器
+const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || '';
 
 /**
  * Fetch a binary/text file (e.g. CSV export) with the bearer token,
@@ -254,6 +255,7 @@ export interface Device {
   ownerCompanyId: string | null;
   ownerCompanyName: string | null;
   currentTeamId: string | null;
+  currentTeamName: string | null;
   lastState: string;
   lastBattery: number | null;
   lastSeenAt: string | null;

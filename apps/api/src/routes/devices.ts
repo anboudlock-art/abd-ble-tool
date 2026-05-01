@@ -494,6 +494,7 @@ function serialize(d: DeviceWithRelations) {
     ownerCompanyId: d.ownerCompanyId?.toString() ?? null,
     ownerCompanyName: d.ownerCompany?.name ?? null,
     currentTeamId: d.currentTeamId?.toString() ?? null,
+    currentTeamName: (d.currentTeam as { name?: string } | null)?.name ?? null,
     lastState: d.lastState,
     lastBattery: d.lastBattery,
     lastSeenAt: d.lastSeenAt?.toISOString() ?? null,

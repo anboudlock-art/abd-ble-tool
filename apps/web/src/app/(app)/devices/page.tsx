@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Beaker, Download, FileUp, Pencil, Plus, Search, Trash2, Truck, UsersRound } from 'lucide-react';
+import { Beaker, BoxSelect, Download, FileUp, Pencil, Plus, Search, Trash2, Truck, UsersRound } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import {
   apiRequest,
@@ -24,6 +24,7 @@ import { ManualRegisterDialog } from '@/components/ManualRegisterDialog';
 import { ImportDialog } from '@/components/ImportDialog';
 import { TestDeviceDialog } from '@/components/TestDeviceDialog';
 import { EditDeviceDialog } from '@/components/EditDeviceDialog';
+import { DeliverDialog } from '@/components/DeliverDialog';
 import { useAuth } from '@/providers/AuthProvider';
 
 const STATUS_OPTIONS = [
@@ -50,6 +51,7 @@ export default function DevicesPage() {
   const [showRegisterDialog, setShowRegisterDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showTestDialog, setShowTestDialog] = useState(false);
+  const [showDeliverDialog, setShowDeliverDialog] = useState(false);
   const [editing, setEditing] = useState<Device | null>(null);
   const [exporting, setExporting] = useState(false);
   const router = useRouter();
@@ -68,6 +70,9 @@ export default function DevicesPage() {
     user?.role === 'vendor_admin' ||
     user?.role === 'company_admin' ||
     user?.role === 'dept_admin';
+  const canDeliver =
+    user?.role === 'vendor_admin' ||
+    user?.role === 'company_admin';
 
   const modelsQ = useQuery({
     queryKey: ['device-models'],
@@ -116,6 +121,14 @@ export default function DevicesPage() {
         (data?.items ?? []).some(
           (d) => d.id === id && (d.status === 'delivered' || d.status === 'assigned'),
         ),
+      ),
+    [selected, data],
+  );
+
+  const selectedDeliverable = useMemo(
+    () =>
+      Array.from(selected).filter((id) =>
+        (data?.items ?? []).some((d) => d.id === id && d.status === 'shipped'),
       ),
     [selected, data],
   );
@@ -180,6 +193,11 @@ export default function DevicesPage() {
           {isVendor && selectedShippable.length > 0 ? (
             <Button onClick={() => setShowShipDialog(true)}>
               <Truck size={14} /> 发货 ({selectedShippable.length})
+            </Button>
+          ) : null}
+          {canDeliver && selectedDeliverable.length > 0 ? (
+            <Button variant="secondary" onClick={() => setShowDeliverDialog(true)}>
+              <BoxSelect size={14} /> 确认入库 ({selectedDeliverable.length})
             </Button>
           ) : null}
           {canAssign && selectedAssignable.length > 0 ? (
@@ -415,6 +433,17 @@ export default function DevicesPage() {
           onClose={() => setShowAssignDialog(false)}
           onAssigned={() => {
             setShowAssignDialog(false);
+            setSelected(new Set());
+          }}
+        />
+      ) : null}
+
+      {showDeliverDialog ? (
+        <DeliverDialog
+          selectedDeviceIds={selectedDeliverable}
+          onClose={() => setShowDeliverDialog(false)}
+          onDelivered={() => {
+            setShowDeliverDialog(false);
             setSelected(new Set());
           }}
         />
