@@ -84,6 +84,42 @@ export default async function notificationRoutes(app: FastifyInstance) {
     },
   );
 
+  /** PUT alias for /notifications/:id/read — APP convention is PUT. */
+  typed.put(
+    '/notifications/:id/read',
+    {
+      onRequest: [app.authenticate],
+      schema: { params: z.object({ id: z.coerce.number().int().positive() }) },
+    },
+    async (req, reply) => {
+      const ctx = getAuthContext(req);
+      const id = BigInt(req.params.id);
+      const n = await prisma.notification.findUnique({ where: { id } });
+      if (!n) throw ApiError.notFound();
+      if (n.userId !== ctx.userId) throw ApiError.forbidden();
+      if (!n.readAt) {
+        await prisma.notification.update({
+          where: { id },
+          data: { readAt: new Date() },
+        });
+      }
+      reply.code(204);
+    },
+  );
+
+  /** Cheap unread-count endpoint for header badges. */
+  typed.get(
+    '/notifications/unread-count',
+    { onRequest: [app.authenticate] },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const count = await prisma.notification.count({
+        where: { userId: ctx.userId, readAt: null },
+      });
+      return { unreadCount: count };
+    },
+  );
+
   /** Mark all unread notifications for the caller as read. */
   typed.post(
     '/notifications/read-all',

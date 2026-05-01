@@ -68,6 +68,7 @@ export const DeviceStatusEnum = z.enum([
   'delivered',
   'assigned',
   'active',
+  'repairing',
   'returned',
   'retired',
 ]);

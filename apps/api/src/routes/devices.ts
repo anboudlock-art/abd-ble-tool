@@ -616,6 +616,156 @@ export default async function deviceRoutes(app: FastifyInstance) {
       };
     },
   );
+
+  /** APP convenience: device current state (last reported) + battery. */
+  typed.get(
+    '/devices/:id/status',
+    {
+      onRequest: [app.authenticate],
+      schema: { params: z.object({ id: z.coerce.number().int().positive() }) },
+    },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const id = BigInt(req.params.id);
+      const d = await prisma.device.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          lockId: true,
+          status: true,
+          lastState: true,
+          lastBattery: true,
+          lastSeenAt: true,
+          ownerCompanyId: true,
+          gatewayId: true,
+          gateway: { select: { online: true } },
+        },
+      });
+      if (!d) throw ApiError.notFound();
+      const scope = scopeToCompany(ctx);
+      if (scope.companyId && d.ownerCompanyId !== scope.companyId) {
+        throw ApiError.forbidden();
+      }
+      return {
+        id: d.id.toString(),
+        lockId: d.lockId,
+        status: d.status,
+        lastState: d.lastState,
+        lastBattery: d.lastBattery,
+        lastSeenAt: d.lastSeenAt?.toISOString() ?? null,
+        gatewayOnline: d.gateway?.online ?? null,
+      };
+    },
+  );
+
+  /** Latest deployment for the device — place + photos + when. */
+  typed.get(
+    '/devices/:id/deployment',
+    {
+      onRequest: [app.authenticate],
+      schema: { params: z.object({ id: z.coerce.number().int().positive() }) },
+    },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const id = BigInt(req.params.id);
+      const d = await prisma.device.findUnique({ where: { id } });
+      if (!d) throw ApiError.notFound();
+      const scope = scopeToCompany(ctx);
+      if (scope.companyId && d.ownerCompanyId !== scope.companyId) {
+        throw ApiError.forbidden();
+      }
+      const dep = await prisma.deviceDeployment.findFirst({
+        where: { deviceId: id },
+        orderBy: { deployedAt: 'desc' },
+        include: { team: { select: { id: true, name: true } } },
+      });
+      if (!dep) return { current: null };
+      return {
+        current: {
+          id: dep.id.toString(),
+          deviceId: dep.deviceId.toString(),
+          lat: dep.lat?.toString() ?? null,
+          lng: dep.lng?.toString() ?? null,
+          accuracyM: dep.accuracyM,
+          doorLabel: dep.doorLabel,
+          photoUrls: dep.photoUrls,
+          teamId: dep.team?.id.toString() ?? null,
+          teamName: dep.team?.name ?? null,
+          deployedAt: dep.deployedAt.toISOString(),
+          operatorUserId: dep.operatorUserId.toString(),
+        },
+      };
+    },
+  );
+
+  /** A3: bind/补绑 MAC + IMEI on a device that was registered without them
+   *  (e.g. lock id created but BLE failed at register time). */
+  typed.post(
+    '/devices/:id/bind',
+    {
+      onRequest: [app.authenticate],
+      schema: {
+        params: z.object({ id: z.coerce.number().int().positive() }),
+        body: z.object({
+          bleMac: z
+            .string()
+            .regex(/^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$/)
+            .optional(),
+          imei: z.string().regex(/^\d{15}$/).optional(),
+          firmwareVersion: z.string().max(32).optional(),
+        }),
+      },
+    },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const id = BigInt(req.params.id);
+      const d = await prisma.device.findUnique({ where: { id } });
+      if (!d || d.deletedAt) throw ApiError.notFound();
+      const scope = scopeToCompany(ctx);
+      if (scope.companyId && d.ownerCompanyId !== scope.companyId) {
+        throw ApiError.forbidden();
+      }
+      // Anyone who can see the device can finish its binding (factory line +
+      // company admin + operator). No role gate beyond visibility.
+
+      const { bleMac, imei, firmwareVersion } = req.body;
+      if (!bleMac && !imei && !firmwareVersion) {
+        throw ApiError.conflict('Nothing to bind');
+      }
+
+      // Uniqueness checks for non-null incoming values.
+      if (bleMac) {
+        const dup = await prisma.device.findFirst({
+          where: { bleMac, NOT: { id } },
+          select: { id: true },
+        });
+        if (dup) throw ApiError.conflict(`MAC ${bleMac} already bound to another device`);
+      }
+      if (imei) {
+        const dup = await prisma.device.findFirst({
+          where: { imei, NOT: { id } },
+          select: { id: true },
+        });
+        if (dup) throw ApiError.conflict(`IMEI ${imei} already bound to another device`);
+      }
+
+      const updated = await prisma.device.update({
+        where: { id },
+        data: {
+          ...(bleMac ? { bleMac } : {}),
+          ...(imei ? { imei } : {}),
+          ...(firmwareVersion ? { firmwareVersion } : {}),
+        },
+      });
+      return {
+        id: updated.id.toString(),
+        lockId: updated.lockId,
+        bleMac: updated.bleMac,
+        imei: updated.imei,
+        firmwareVersion: updated.firmwareVersion,
+      };
+    },
+  );
 }
 
 function csvEscape(v: string): string {

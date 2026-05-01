@@ -9,6 +9,9 @@ import type { FastifyInstance } from 'fastify';
 export async function resetDb(): Promise<void> {
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
+      temporary_unlock,
+      permission_request_item,
+      permission_request,
       notification,
       refresh_token,
       alarm,
@@ -18,12 +21,14 @@ export async function resetDb(): Promise<void> {
       audit_log,
       device_firmware_task,
       firmware_package,
+      device_repair,
       device_command,
       lock_event,
       device_deployment,
       device_assignment,
       device_transfer,
       production_scan,
+      lock_number,
       device,
       production_batch,
       gateway_session,
