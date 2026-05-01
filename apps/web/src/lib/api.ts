@@ -265,6 +265,8 @@ export interface Device {
   loraChannel: number | null;
   loraDevAddr: string | null;
   loraDevEui: string | null;
+  locationLat?: number | null;
+  locationLng?: number | null;
   deployedAt: string | null;
   batchId: string | null;
   batchNo: string | null;
@@ -303,7 +305,28 @@ export interface ProductionBatch {
   actualDeviceCount: number;
   producedAt: string | null;
   remark: string | null;
+  completedAt?: string | null;
+  completedByUserId?: string | null;
   createdAt: string;
+}
+
+export interface AuditLog {
+  id: string;
+  companyId: string | null;
+  actor: { id: string; name: string; phone: string } | null;
+  actorIp: string | null;
+  action: string;
+  targetType: string | null;
+  targetId: string | null;
+  diff: unknown;
+  createdAt: string;
+}
+
+export interface AuditLogListResp {
+  items: AuditLog[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 export interface BatchListResp {

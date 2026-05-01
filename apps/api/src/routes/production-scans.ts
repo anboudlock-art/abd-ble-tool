@@ -31,6 +31,11 @@ export default async function productionScanRoutes(app: FastifyInstance) {
         include: { model: true },
       });
       if (!batch) throw ApiError.notFound(`Batch ${batchId} not found`);
+      if (batch.completedAt) {
+        throw ApiError.conflict(
+          `Batch ${batch.batchNo} is completed; reopen it before adding more scans`,
+        );
+      }
 
       // Reject mismatched MAC for existing lockId (protects against QR-label swap)
       const existingByLock = await prisma.device.findUnique({ where: { lockId } });

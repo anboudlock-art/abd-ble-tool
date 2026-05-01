@@ -29,6 +29,7 @@ import deviceCommandRoutes from './routes/device-commands.js';
 import alarmRoutes from './routes/alarms.js';
 import dashboardRoutes from './routes/dashboard.js';
 import notificationRoutes from './routes/notifications.js';
+import auditLogRoutes from './routes/audit-logs.js';
 import integrationRoutes from './routes/integrations.js';
 import openApiRoutes from './routes/open-api.js';
 import openApiAuthPlugin from './middlewares/open-api-auth.js';
@@ -110,6 +111,7 @@ export async function buildApp() {
   await app.register(alarmRoutes, { prefix: '/api/v1' });
   await app.register(dashboardRoutes, { prefix: '/api/v1' });
   await app.register(notificationRoutes, { prefix: '/api/v1' });
+  await app.register(auditLogRoutes, { prefix: '/api/v1' });
   await app.register(integrationRoutes, { prefix: '/api/v1' });
 
   // Public Open API for third-party integrations. Different prefix + HMAC auth.
@@ -117,6 +119,69 @@ export async function buildApp() {
     await scope.register(openApiAuthPlugin);
     await scope.register(openApiRoutes);
   }, { prefix: '/openapi/v1' });
+
+  // Curated documentation for the Open API surface only. Reuses the
+  // already-generated swagger spec but filters to /openapi/v1/* paths.
+  if (config.NODE_ENV !== 'test') {
+    app.get('/openapi-docs/openapi.json', async () => {
+      // app.swagger() is the helper that returns the active spec.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const spec = (app as unknown as { swagger: () => any }).swagger();
+      const filtered = JSON.parse(JSON.stringify(spec));
+      const paths = filtered.paths ?? {};
+      filtered.paths = Object.fromEntries(
+        Object.entries(paths).filter(([p]) => p.startsWith('/openapi/v1')),
+      );
+      filtered.info = {
+        title: 'Anboud — Open API for Third-Party Integration',
+        description:
+          'HMAC-SHA256 signed REST endpoints. See /docs (internal) for the' +
+          ' management API. Headers: X-Abd-Key, X-Abd-Timestamp,' +
+          ' X-Abd-Nonce, X-Abd-Signature.',
+        version: '0.1.0',
+      };
+      filtered.security = [];
+      filtered.components = {
+        ...(filtered.components ?? {}),
+        securitySchemes: {
+          AbdHmac: {
+            type: 'apiKey',
+            in: 'header',
+            name: 'X-Abd-Signature',
+            description:
+              'HMAC-SHA256 over METHOD\\nPATH\\nTIMESTAMP\\nNONCE\\nHMAC(body).' +
+              ' Send X-Abd-Key/Timestamp/Nonce alongside.',
+          },
+        },
+      };
+      return filtered;
+    });
+
+    app.get('/openapi-docs', async (_req, reply) => {
+      const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Anboud Open API</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+  <style>body{margin:0}#swagger-ui{max-width:1200px;margin:0 auto}</style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    window.ui = SwaggerUIBundle({
+      url: '/openapi-docs/openapi.json',
+      dom_id: '#swagger-ui',
+      docExpansion: 'list',
+      deepLinking: true,
+    });
+  </script>
+</body>
+</html>`;
+      reply.type('text/html').send(html);
+    });
+  }
 
   return app;
 }

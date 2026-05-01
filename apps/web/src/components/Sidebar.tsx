@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { AlertTriangle, Boxes, Building2, KeyRound, LayoutDashboard, Lock, LogOut, Plug, UsersRound } from 'lucide-react';
+import { AlertTriangle, Boxes, Building2, ClipboardList, KeyRound, LayoutDashboard, Lock, LogOut, Plug, UsersRound } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -34,6 +34,12 @@ const items: NavItem[] = [
     href: '/integrations',
     label: '对接 API',
     icon: Plug,
+    roles: ['vendor_admin', 'company_admin'],
+  },
+  {
+    href: '/audit-logs',
+    label: '操作日志',
+    icon: ClipboardList,
     roles: ['vendor_admin', 'company_admin'],
   },
 ];

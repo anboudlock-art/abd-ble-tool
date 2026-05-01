@@ -509,6 +509,8 @@ function serialize(d: DeviceWithRelations) {
     batchId: d.batchId?.toString() ?? null,
     batchNo: d.batch?.batchNo ?? null,
     producedAt: d.producedAt?.toISOString() ?? null,
+    locationLat: d.locationLat ? Number(d.locationLat) : null,
+    locationLng: d.locationLng ? Number(d.locationLng) : null,
     createdAt: d.createdAt.toISOString(),
   };
 }

@@ -3,6 +3,7 @@ import { Redis } from 'ioredis';
 import pino from 'pino';
 import { z } from 'zod';
 import { notify, prisma } from '@abd/db';
+import { dispatchSms } from './sms.js';
 import { signWebhookBody } from './hmac.js';
 
 const ConfigSchema = z.object({
@@ -26,12 +27,14 @@ export const QUEUE_WEBHOOK_DELIVERY = 'webhook-delivery';
 export const QUEUE_COMMAND_TIMEOUT = 'command-timeout';
 export const QUEUE_NOTIFICATIONS = 'notifications';
 export const QUEUE_OFFLINE_CHECK = 'offline-check';
+export const QUEUE_SMS = 'sms';
 
 export const queues = {
   webhookDelivery: new Queue(QUEUE_WEBHOOK_DELIVERY, { connection }),
   commandTimeout: new Queue(QUEUE_COMMAND_TIMEOUT, { connection }),
   notifications: new Queue(QUEUE_NOTIFICATIONS, { connection }),
   offlineCheck: new Queue(QUEUE_OFFLINE_CHECK, { connection }),
+  sms: new Queue(QUEUE_SMS, { connection }),
 };
 
 interface WebhookJob {
@@ -152,6 +155,28 @@ const workers = [
       log.info({ jobId: job.id, data: job.data }, 'notification dispatch (stub)');
     },
     { connection },
+  ),
+
+  // SMS dispatcher: every job is a single send to one phone number with
+  // an Aliyun TemplateCode + params. The provider is currently a stub
+  // (logs only); set ALIYUN_SMS_* and swap getSmsProvider() in sms.ts to
+  // enable real delivery.
+  new Worker(
+    QUEUE_SMS,
+    async (job) => {
+      const data = job.data as {
+        phone: string;
+        templateCode: string;
+        templateParam?: Record<string, string>;
+      };
+      const result = await dispatchSms(log, data);
+      if (!result.success) throw new Error(result.message ?? 'sms send failed');
+    },
+    {
+      connection,
+      concurrency: 4,
+      limiter: { max: 20, duration: 1000 }, // be polite to Aliyun
+    },
   ),
 
   /**

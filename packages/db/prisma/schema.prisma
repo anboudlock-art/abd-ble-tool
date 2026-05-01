@@ -298,16 +298,21 @@ model Device {
 }
 
 model ProductionBatch {
-  id             BigInt   @id @default(autoincrement())
-  ulid           String   @unique @default(cuid())
-  batchNo        String   @unique @map("batch_no") @db.VarChar(32)
-  modelId        BigInt   @map("model_id")
-  quantity       Int
-  producedCount  Int      @default(0) @map("produced_count")
-  producedAt     DateTime? @map("produced_at") @db.Date
-  operatorUserId BigInt?  @map("operator_user_id")
-  remark         String?  @db.Text
-  createdAt      DateTime @default(now()) @map("created_at")
+  id                   BigInt   @id @default(autoincrement())
+  ulid                 String   @unique @default(cuid())
+  batchNo              String   @unique @map("batch_no") @db.VarChar(32)
+  modelId              BigInt   @map("model_id")
+  quantity             Int
+  producedCount        Int      @default(0) @map("produced_count")
+  producedAt           DateTime? @map("produced_at") @db.Date
+  operatorUserId       BigInt?  @map("operator_user_id")
+  remark               String?  @db.Text
+  /// Closing the batch locks scans + transitions devices automatically out of
+  /// "in production" tracking. Once set, no more production_scan rows can be
+  /// written for this batchId.
+  completedAt          DateTime? @map("completed_at")
+  completedByUserId    BigInt?   @map("completed_by_user_id")
+  createdAt            DateTime @default(now()) @map("created_at")
 
   model          DeviceModel @relation(fields: [modelId], references: [id])
   devices        Device[]

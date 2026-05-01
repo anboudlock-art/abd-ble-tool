@@ -2,16 +2,19 @@
 
 import { use } from 'react';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowLeft, Lock as LockIcon, Unlock } from 'lucide-react';
 import {
   apiRequest,
+  ApiClientError,
   type ProductionBatch,
   type ProductionScan,
 } from '@/lib/api';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Table, THead, TBody, Tr, Th, Td, EmptyState } from '@/components/ui/Table';
 import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
+import { useAuth } from '@/providers/AuthProvider';
 
 export default function BatchDetailPage({
   params,
@@ -19,10 +22,27 @@ export default function BatchDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  const isVendor = user?.role === 'vendor_admin';
 
   const batchQ = useQuery({
     queryKey: ['batch', id],
     queryFn: () => apiRequest<ProductionBatch>(`/api/v1/production/batches/${id}`),
+  });
+
+  const complete = useMutation({
+    mutationFn: () =>
+      apiRequest(`/api/v1/production/batches/${id}/complete`, { method: 'POST' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['batch', id] }),
+    onError: (e) => alert(e instanceof ApiClientError ? e.body.message : '操作失败'),
+  });
+
+  const reopen = useMutation({
+    mutationFn: () =>
+      apiRequest(`/api/v1/production/batches/${id}/reopen`, { method: 'POST' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['batch', id] }),
+    onError: (e) => alert(e instanceof ApiClientError ? e.body.message : '操作失败'),
   });
 
   const scansQ = useQuery({
@@ -54,11 +74,55 @@ export default function BatchDetailPage({
         <ArrowLeft size={14} /> 返回批次列表
       </Link>
 
-      <div>
-        <h1 className="font-mono text-2xl font-semibold text-slate-900">{b.batchNo}</h1>
-        <p className="mt-1 text-xs text-slate-500">
-          {b.modelCode} · {b.modelName}
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <div className="flex items-center gap-3">
+            <h1 className="font-mono text-2xl font-semibold text-slate-900">{b.batchNo}</h1>
+            {b.completedAt ? (
+              <Badge tone="gray">已完结</Badge>
+            ) : (
+              <Badge tone="green">进行中</Badge>
+            )}
+          </div>
+          <p className="mt-1 text-xs text-slate-500">
+            {b.modelCode} · {b.modelName}
+            {b.completedAt ? (
+              <span className="ml-2">
+                · 完结于 {new Date(b.completedAt).toLocaleString('zh-CN')}
+              </span>
+            ) : null}
+          </p>
+        </div>
+        {isVendor ? (
+          <div>
+            {b.completedAt ? (
+              <Button
+                variant="secondary"
+                loading={reopen.isPending}
+                onClick={() => {
+                  if (confirm(`重新开放批次 ${b.batchNo}？`)) reopen.mutate();
+                }}
+              >
+                <Unlock size={14} /> 重新开放
+              </Button>
+            ) : (
+              <Button
+                loading={complete.isPending}
+                onClick={() => {
+                  if (
+                    confirm(
+                      `完结批次 ${b.batchNo}？完结后将无法继续添加扫码记录`,
+                    )
+                  ) {
+                    complete.mutate();
+                  }
+                }}
+              >
+                <LockIcon size={14} /> 完结批次
+              </Button>
+            )}
+          </div>
+        ) : null}
       </div>
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">

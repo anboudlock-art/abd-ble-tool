@@ -81,6 +81,11 @@ export default function BatchesPage() {
                       >
                         {b.batchNo}
                       </Link>
+                      {b.completedAt ? (
+                        <span className="ml-2 inline-block rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500">
+                          已完结
+                        </span>
+                      ) : null}
                     </Td>
                     <Td>
                       {b.modelCode ?? '—'}

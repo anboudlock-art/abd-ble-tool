@@ -16,6 +16,7 @@ import { Badge, deviceStatusLabel, deviceStatusTone } from '@/components/ui/Badg
 import { Button } from '@/components/ui/Button';
 import { RemoteControl } from '@/components/RemoteControl';
 import { EditDeviceDialog } from '@/components/EditDeviceDialog';
+import { DeviceMap } from '@/components/DeviceMap';
 import { useAuth } from '@/providers/AuthProvider';
 
 export default function DeviceDetailPage({
@@ -169,6 +170,10 @@ export default function DeviceDetailPage({
           onClose={() => setShowEdit(false)}
           onSaved={() => setShowEdit(false)}
         />
+      ) : null}
+
+      {(d.locationLat != null || d.locationLng != null) && d.model?.code !== 'ESEAL-LOGI-01' ? (
+        <DeviceMap lat={d.locationLat} lng={d.locationLng} doorLabel={d.doorLabel} />
       ) : null}
 
       <RemoteControl device={d} />

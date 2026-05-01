@@ -146,6 +146,60 @@ export default async function productionBatchRoutes(app: FastifyInstance) {
       reply.code(204);
     },
   );
+
+  /**
+   * Mark a batch completed. Locks further scans and stamps the actor.
+   * Idempotent: re-completing a finished batch returns 200 with the
+   * existing completedAt.
+   */
+  typed.post(
+    '/production/batches/:id/complete',
+    {
+      onRequest: [app.authenticate, requireRole('vendor_admin')],
+      schema: { params: z.object({ id: z.coerce.number().int().positive() }) },
+    },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const id = BigInt(req.params.id);
+      const b = await prisma.productionBatch.findUnique({
+        where: { id },
+        include: { model: true, _count: { select: { devices: true, scans: true } } },
+      });
+      if (!b) throw ApiError.notFound();
+      if (b.completedAt) {
+        return serialize(b);
+      }
+      const updated = await prisma.productionBatch.update({
+        where: { id },
+        data: {
+          completedAt: new Date(),
+          completedByUserId: ctx.userId,
+        },
+        include: { model: true, _count: { select: { devices: true, scans: true } } },
+      });
+      return serialize(updated);
+    },
+  );
+
+  typed.post(
+    '/production/batches/:id/reopen',
+    {
+      onRequest: [app.authenticate, requireRole('vendor_admin')],
+      schema: { params: z.object({ id: z.coerce.number().int().positive() }) },
+    },
+    async (req) => {
+      const id = BigInt(req.params.id);
+      const b = await prisma.productionBatch.findUnique({ where: { id } });
+      if (!b) throw ApiError.notFound();
+      if (!b.completedAt) throw ApiError.conflict('Batch is not completed');
+      const updated = await prisma.productionBatch.update({
+        where: { id },
+        data: { completedAt: null, completedByUserId: null },
+        include: { model: true, _count: { select: { devices: true, scans: true } } },
+      });
+      return serialize(updated);
+    },
+  );
 }
 
 type BatchWithRelations = Awaited<ReturnType<typeof prisma.productionBatch.findMany>>[number] & {
@@ -166,6 +220,8 @@ function serialize(b: BatchWithRelations) {
     actualDeviceCount: b._count.devices,
     producedAt: b.producedAt?.toISOString() ?? null,
     remark: b.remark,
+    completedAt: b.completedAt?.toISOString() ?? null,
+    completedByUserId: b.completedByUserId?.toString() ?? null,
     createdAt: b.createdAt.toISOString(),
   };
 }
