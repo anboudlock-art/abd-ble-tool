@@ -17,3 +17,4 @@ if (process.env.NODE_ENV !== 'production') {
 
 export * from '@prisma/client';
 export * from './notify.js';
+export * from './alarm-fanout.js';

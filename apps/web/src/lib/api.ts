@@ -567,3 +567,52 @@ export interface DeviceCommand {
   errorMessage: string | null;
   createdAt: string;
 }
+
+// ----- Firmware (OTA) -----
+
+export interface FirmwarePackage {
+  id: string;
+  ulid: string;
+  companyId: string | null;
+  modelId: string;
+  modelCode: string;
+  modelName: string;
+  version: string;
+  url: string;
+  sha256: string;
+  sizeBytes: number;
+  changelog: string | null;
+  status: 'draft' | 'released' | 'archived';
+  uploadedByUserId: string | null;
+  releasedAt: string | null;
+  createdAt: string;
+}
+
+export interface FirmwarePackageListResp {
+  items: FirmwarePackage[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface FirmwareTask {
+  id: string;
+  packageId: string;
+  deviceId: string;
+  status: 'queued' | 'pushing' | 'succeeded' | 'failed' | 'cancelled';
+  progress: number;
+  errorMessage: string | null;
+  scheduledAt: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  triggeredByUserId: string | null;
+  createdAt: string;
+  packageVersion: string;
+}
+
+export interface FirmwareTaskListResp {
+  items: FirmwareTask[];
+  total: number;
+  page: number;
+  pageSize: number;
+}

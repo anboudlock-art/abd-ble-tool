@@ -13,6 +13,9 @@
   "dependencies": {
     "@abd/db": "workspace:*",
     "@abd/shared": "workspace:*",
+    "@alicloud/dysmsapi20170525": "^3.0.0",
+    "@alicloud/openapi-client": "^0.4.13",
+    "@alicloud/tea-util": "^1.4.10",
     "bullmq": "^5.34.0",
     "ioredis": "^5.4.1",
     "pino": "^9.5.0",

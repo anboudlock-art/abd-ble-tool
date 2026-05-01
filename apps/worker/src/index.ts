@@ -2,7 +2,7 @@ import { Worker, Queue } from 'bullmq';
 import { Redis } from 'ioredis';
 import pino from 'pino';
 import { z } from 'zod';
-import { notify, prisma } from '@abd/db';
+import { alarmFanout, prisma } from '@abd/db';
 import { dispatchSms } from './sms.js';
 import { signWebhookBody } from './hmac.js';
 
@@ -137,9 +137,9 @@ const workers = [
             payload: { commandId: cmd.id.toString() },
           },
         });
-        await notify({
+        await alarmFanout({
           companyId: cmd.device.ownerCompanyId,
-          kind: 'alarm',
+          severity: 'warning',
           title: '指令超时',
           body: msg,
           link: `/devices/${cmd.deviceId}`,
@@ -224,9 +224,9 @@ const workers = [
             dedupKey,
           },
         });
-        await notify({
+        await alarmFanout({
           companyId: d.ownerCompanyId,
-          kind: 'alarm',
+          severity: 'warning',
           title: '设备离线',
           body: msg,
           link: `/devices/${d.id}`,
@@ -239,54 +239,80 @@ const workers = [
   ),
 ];
 
-// Fan-out: subscribe to Redis 'abd:lock-event' pub/sub, look up matching
-// webhook subscriptions, and enqueue one delivery job per match.
+// Fan-out: subscribe to Redis pub/sub channels.
+//   - 'abd:lock-event' → look up webhook subs, enqueue webhook deliveries
+//   - 'abd:sms'        → enqueue SMS jobs (published by alarmFanout for
+//                        critical alarms; we don't import BullMQ in @abd/db
+//                        so the publisher stays light-weight)
 const subscriber = new Redis(config.REDIS_URL);
 const CHAN_LOCK_EVENT = 'abd:lock-event';
-subscriber.subscribe(CHAN_LOCK_EVENT).catch((err) =>
-  log.warn({ err }, 'subscribe failed'),
-);
+const CHAN_SMS = 'abd:sms';
+subscriber
+  .subscribe(CHAN_LOCK_EVENT, CHAN_SMS)
+  .catch((err) => log.warn({ err }, 'subscribe failed'));
 subscriber.on('message', async (channel, raw) => {
-  if (channel !== CHAN_LOCK_EVENT) return;
-  try {
-    const msg = JSON.parse(raw) as { eventId: string; deviceId: string };
-    const event = await prisma.lockEvent.findUnique({
-      where: { id: BigInt(msg.eventId) },
-      include: { device: true },
-    });
-    if (!event || !event.companyId) return;
+  if (channel === CHAN_LOCK_EVENT) {
+    try {
+      const msg = JSON.parse(raw) as { eventId: string; deviceId: string };
+      const event = await prisma.lockEvent.findUnique({
+        where: { id: BigInt(msg.eventId) },
+        include: { device: true },
+      });
+      if (!event || !event.companyId) return;
 
-    const eventType = `lock.${event.eventType}`;
-    const subs = await prisma.webhookSubscription.findMany({
-      where: {
-        active: true,
-        integrationApp: { companyId: event.companyId, status: 'active' },
-      },
-    });
-    const targets = subs.filter((s) => {
-      const types = s.eventTypes as unknown as string[];
-      return types.includes(eventType);
-    });
-    for (const sub of targets) {
-      await queues.webhookDelivery.add(
-        'deliver',
-        {
-          subscriptionId: sub.id.toString(),
-          eventId: event.id.toString(),
-          eventType,
-          payload: {
-            deviceId: event.deviceId.toString(),
-            lockId: event.device.lockId,
-            bleMac: event.device.bleMac,
-            battery: event.battery,
-            createdAt: event.createdAt.toISOString(),
-          },
+      const eventType = `lock.${event.eventType}`;
+      const subs = await prisma.webhookSubscription.findMany({
+        where: {
+          active: true,
+          integrationApp: { companyId: event.companyId, status: 'active' },
         },
-        { attempts: 5, backoff: { type: 'exponential', delay: 5_000 } },
-      );
+      });
+      const targets = subs.filter((s) => {
+        const types = s.eventTypes as unknown as string[];
+        return types.includes(eventType);
+      });
+      for (const sub of targets) {
+        await queues.webhookDelivery.add(
+          'deliver',
+          {
+            subscriptionId: sub.id.toString(),
+            eventId: event.id.toString(),
+            eventType,
+            payload: {
+              deviceId: event.deviceId.toString(),
+              lockId: event.device.lockId,
+              bleMac: event.device.bleMac,
+              battery: event.battery,
+              createdAt: event.createdAt.toISOString(),
+            },
+          },
+          { attempts: 5, backoff: { type: 'exponential', delay: 5_000 } },
+        );
+      }
+    } catch (err) {
+      log.warn({ err }, 'fan-out failed');
     }
-  } catch (err) {
-    log.warn({ err }, 'fan-out failed');
+    return;
+  }
+
+  if (channel === CHAN_SMS) {
+    try {
+      const job = JSON.parse(raw) as {
+        phone: string;
+        templateCode: string;
+        templateParam?: Record<string, string>;
+      };
+      if (!job.phone || !job.templateCode) return;
+      await queues.sms.add('send', job, {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5_000 },
+        removeOnComplete: 1000,
+        removeOnFail: 1000,
+      });
+    } catch (err) {
+      log.warn({ err }, 'sms fan-out failed');
+    }
+    return;
   }
 });
 

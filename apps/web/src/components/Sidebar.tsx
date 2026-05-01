@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { AlertTriangle, Boxes, Building2, ClipboardList, KeyRound, LayoutDashboard, Lock, LogOut, Plug, UsersRound } from 'lucide-react';
+import { AlertTriangle, Boxes, Building2, ClipboardList, Cpu, KeyRound, LayoutDashboard, Lock, LogOut, Plug, Radio, UsersRound } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -35,6 +35,18 @@ const items: NavItem[] = [
     label: '对接 API',
     icon: Plug,
     roles: ['vendor_admin', 'company_admin'],
+  },
+  {
+    href: '/firmware',
+    label: '固件 OTA',
+    icon: Cpu,
+    roles: ['vendor_admin', 'company_admin'],
+  },
+  {
+    href: '/ble-debug',
+    label: 'BLE 调试',
+    icon: Radio,
+    roles: ['vendor_admin', 'production_operator'],
   },
   {
     href: '/audit-logs',
