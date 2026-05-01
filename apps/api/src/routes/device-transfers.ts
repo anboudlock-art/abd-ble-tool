@@ -146,7 +146,7 @@ export default async function deviceTransferRoutes(app: FastifyInstance) {
     },
     async (req) => {
       const ctx = getAuthContext(req);
-      const { deviceIds, teamId } = req.body;
+      const { deviceIds, teamId, userId } = req.body;
       const ids = deviceIds.map(BigInt);
 
       const team = await prisma.team.findUnique({
@@ -156,6 +156,22 @@ export default async function deviceTransferRoutes(app: FastifyInstance) {
       if (!team) throw ApiError.notFound(`Team ${teamId} not found`);
       if (ctx.role !== 'vendor_admin' && team.companyId !== ctx.companyId) {
         throw ApiError.forbidden();
+      }
+
+      // Optional user-scoped assignment: the user must already be a member
+      // of the target team. Otherwise, the assignment would be unreachable.
+      let targetUser: { id: bigint; name: string } | null = null;
+      if (userId !== undefined) {
+        const member = await prisma.userMembership.findUnique({
+          where: { userId_teamId: { userId: BigInt(userId), teamId: team.id } },
+          include: { user: { select: { id: true, name: true, deletedAt: true } } },
+        });
+        if (!member || member.user.deletedAt) {
+          throw ApiError.conflict(
+            `User ${userId} is not a member of team ${team.name}`,
+          );
+        }
+        targetUser = { id: member.user.id, name: member.user.name };
       }
 
       const devices = await prisma.device.findMany({ where: { id: { in: ids } } });
@@ -202,16 +218,29 @@ export default async function deviceTransferRoutes(app: FastifyInstance) {
               toOwnerId: team.id,
               operatorUserId: ctx.userId,
               reason: d.status === newStatus ? 'reassign' : 'assign',
-              metadata: { teamId: team.id.toString(), teamName: team.name },
+              metadata: targetUser
+                ? {
+                    teamId: team.id.toString(),
+                    teamName: team.name,
+                    userId: targetUser.id.toString(),
+                    userName: targetUser.name,
+                  }
+                : { teamId: team.id.toString(), teamName: team.name },
             },
           });
-          // Default-grant the team scope so members can open it
+          // When (re)assigning, retire any prior open assignment rows first
+          // so the device only has one active grant at a time.
+          await tx.deviceAssignment.updateMany({
+            where: { deviceId: d.id, revokedAt: null },
+            data: { revokedAt: new Date() },
+          });
           await tx.deviceAssignment.create({
             data: {
               deviceId: d.id,
               companyId: team.companyId,
-              scope: 'team',
+              scope: targetUser ? 'user' : 'team',
               teamId: team.id,
+              userId: targetUser?.id,
               grantedByUserId: ctx.userId,
             },
           });
@@ -222,8 +251,11 @@ export default async function deviceTransferRoutes(app: FastifyInstance) {
 
       return {
         assignedCount: updated.length,
+        scope: targetUser ? 'user' : 'team',
         teamId: team.id.toString(),
         teamName: team.name,
+        userId: targetUser?.id.toString() ?? null,
+        userName: targetUser?.name ?? null,
         devices: updated.map((d) => ({
           id: d.id.toString(),
           lockId: d.lockId,

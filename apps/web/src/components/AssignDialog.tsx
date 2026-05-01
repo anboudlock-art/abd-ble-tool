@@ -28,6 +28,7 @@ export function AssignDialog({ selectedDeviceIds, fixedCompanyId, onClose, onAss
 
   const [companyId, setCompanyId] = useState(fixedCompanyId ?? user?.companyId ?? '');
   const [teamId, setTeamId] = useState('');
+  const [userId, setUserId] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const companiesQ = useQuery({
@@ -51,6 +52,14 @@ export function AssignDialog({ selectedDeviceIds, fixedCompanyId, onClose, onAss
     return out;
   }, [companyDetailQ.data]);
 
+  const teamMembersQ = useQuery<{
+    items: Array<{ userId: string; name: string; phone: string; roleInTeam: string }>;
+  }>({
+    queryKey: ['team-members', teamId],
+    queryFn: () => apiRequest(`/api/v1/teams/${teamId}/members`),
+    enabled: !!teamId,
+  });
+
   const assign = useMutation({
     mutationFn: () =>
       apiRequest<AssignResponse>('/api/v1/devices/assign', {
@@ -58,6 +67,7 @@ export function AssignDialog({ selectedDeviceIds, fixedCompanyId, onClose, onAss
         body: {
           deviceIds: selectedDeviceIds.map((s) => Number(s)),
           teamId: Number(teamId),
+          ...(userId ? { userId: Number(userId) } : {}),
         },
       }),
     onSuccess: () => {
@@ -114,7 +124,10 @@ export function AssignDialog({ selectedDeviceIds, fixedCompanyId, onClose, onAss
             <label className="mb-1 block text-xs font-medium text-slate-700">班组</label>
             <select
               value={teamId}
-              onChange={(e) => setTeamId(e.target.value)}
+              onChange={(e) => {
+                setTeamId(e.target.value);
+                setUserId('');
+              }}
               disabled={!companyId}
               className="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm disabled:bg-slate-100"
             >
@@ -128,6 +141,32 @@ export function AssignDialog({ selectedDeviceIds, fixedCompanyId, onClose, onAss
             {companyId && teamOptions.length === 0 && !companyDetailQ.isLoading ? (
               <p className="mt-1 text-xs text-amber-600">
                 该公司暂无班组，请先在公司详情页创建
+              </p>
+            ) : null}
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-700">
+              指派给人员 <span className="text-slate-400">（可选，不选则给整个班组）</span>
+            </label>
+            <select
+              value={userId}
+              onChange={(e) => setUserId(e.target.value)}
+              disabled={!teamId}
+              className="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm disabled:bg-slate-100"
+            >
+              <option value="">— 整个班组 —</option>
+              {teamMembersQ.data?.items.map((m) => (
+                <option key={m.userId} value={m.userId}>
+                  {m.name} ({m.phone}){m.roleInTeam === 'leader' ? ' · 组长' : ''}
+                </option>
+              ))}
+            </select>
+            {teamId &&
+            !teamMembersQ.isLoading &&
+            (teamMembersQ.data?.items.length ?? 0) === 0 ? (
+              <p className="mt-1 text-xs text-amber-600">
+                该班组暂无成员，请先在班组管理处添加
               </p>
             ) : null}
           </div>

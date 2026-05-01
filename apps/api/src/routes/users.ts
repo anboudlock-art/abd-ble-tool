@@ -244,6 +244,152 @@ export default async function userRoutes(app: FastifyInstance) {
     },
   );
 
+  /** List members of a team. Used by AssignDialog to populate the user picker. */
+  typed.get(
+    '/teams/:id/members',
+    {
+      onRequest: [app.authenticate],
+      schema: { params: z.object({ id: z.coerce.number().int().positive() }) },
+    },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const teamId = BigInt(req.params.id);
+      const team = await prisma.team.findUnique({ where: { id: teamId } });
+      if (!team) throw ApiError.notFound('Team not found');
+      const scope = scopeToCompany(ctx);
+      if (scope.companyId && scope.companyId !== team.companyId) throw ApiError.forbidden();
+
+      const memberships = await prisma.userMembership.findMany({
+        where: { teamId, user: { deletedAt: null } },
+        include: { user: { select: { id: true, name: true, phone: true, role: true } } },
+        orderBy: { joinedAt: 'asc' },
+      });
+      return {
+        items: memberships.map((m) => ({
+          userId: m.user.id.toString(),
+          name: m.user.name,
+          phone: m.user.phone,
+          role: m.user.role,
+          roleInTeam: m.roleInTeam,
+          joinedAt: m.joinedAt.toISOString(),
+        })),
+      };
+    },
+  );
+
+  /** Remove a user from a team. */
+  typed.delete(
+    '/teams/:teamId/members/:userId',
+    {
+      onRequest: [
+        app.authenticate,
+        requireRole('vendor_admin', 'company_admin', 'dept_admin', 'team_leader'),
+      ],
+      schema: {
+        params: z.object({
+          teamId: z.coerce.number().int().positive(),
+          userId: z.coerce.number().int().positive(),
+        }),
+      },
+    },
+    async (req, reply) => {
+      const ctx = getAuthContext(req);
+      const teamId = BigInt(req.params.teamId);
+      const userId = BigInt(req.params.userId);
+
+      const team = await prisma.team.findUnique({ where: { id: teamId } });
+      if (!team) throw ApiError.notFound('Team not found');
+      const scope = scopeToCompany(ctx);
+      if (scope.companyId && scope.companyId !== team.companyId) throw ApiError.forbidden();
+
+      const member = await prisma.userMembership.findUnique({
+        where: { userId_teamId: { userId, teamId } },
+      });
+      if (!member) throw ApiError.notFound('Membership not found');
+
+      // If the user has any open user-scoped device assignments through this
+      // team, downgrade them to team-scoped so the device stays reachable
+      // by the rest of the team rather than going dark.
+      await prisma.$transaction(async (tx) => {
+        await tx.deviceAssignment.updateMany({
+          where: { teamId, userId, revokedAt: null },
+          data: { scope: 'team', userId: null },
+        });
+        await tx.userMembership.delete({
+          where: { userId_teamId: { userId, teamId } },
+        });
+      });
+      reply.code(204);
+    },
+  );
+
+  /** Devices that are currently authorised to a given user (scope=user). */
+  typed.get(
+    '/users/:id/devices',
+    {
+      onRequest: [app.authenticate],
+      schema: { params: z.object({ id: z.coerce.number().int().positive() }) },
+    },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const id = BigInt(req.params.id);
+      const target = await prisma.user.findUnique({ where: { id } });
+      if (!target || target.deletedAt) throw ApiError.notFound();
+
+      // Members can read their own list; managers can read others within scope.
+      if (ctx.userId !== target.id) {
+        if (
+          ctx.role !== 'vendor_admin' &&
+          ctx.role !== 'company_admin' &&
+          ctx.role !== 'dept_admin' &&
+          ctx.role !== 'team_leader'
+        ) {
+          throw ApiError.forbidden();
+        }
+        const scope = scopeToCompany(ctx);
+        if (scope.companyId && target.companyId !== scope.companyId) {
+          throw ApiError.forbidden();
+        }
+      }
+
+      const assignments = await prisma.deviceAssignment.findMany({
+        where: { userId: id, revokedAt: null, scope: 'user' },
+        orderBy: { id: 'desc' },
+        include: {
+          device: {
+            select: {
+              id: true,
+              lockId: true,
+              bleMac: true,
+              status: true,
+              lastState: true,
+              lastBattery: true,
+              lastSeenAt: true,
+              doorLabel: true,
+            },
+          },
+          team: { select: { id: true, name: true } },
+        },
+      });
+      return {
+        items: assignments.map((a) => ({
+          assignmentId: a.id.toString(),
+          deviceId: a.device.id.toString(),
+          lockId: a.device.lockId,
+          bleMac: a.device.bleMac,
+          status: a.device.status,
+          lastState: a.device.lastState,
+          lastBattery: a.device.lastBattery,
+          lastSeenAt: a.device.lastSeenAt?.toISOString() ?? null,
+          doorLabel: a.device.doorLabel,
+          teamId: a.team?.id.toString() ?? null,
+          teamName: a.team?.name ?? null,
+          createdAt: a.createdAt.toISOString(),
+        })),
+      };
+    },
+  );
+
   /** Edit basic user attributes. Phone/role/companyId immutable here. */
   typed.put(
     '/users/:id',

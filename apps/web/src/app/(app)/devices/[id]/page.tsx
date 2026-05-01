@@ -4,7 +4,7 @@ import { use, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Pencil, Trash2 } from 'lucide-react';
+import { ArrowLeft, MapPin, Pencil, Trash2 } from 'lucide-react';
 import {
   apiRequest,
   type Device,
@@ -16,8 +16,22 @@ import { Badge, deviceStatusLabel, deviceStatusTone } from '@/components/ui/Badg
 import { Button } from '@/components/ui/Button';
 import { RemoteControl } from '@/components/RemoteControl';
 import { EditDeviceDialog } from '@/components/EditDeviceDialog';
+import { DeployDialog } from '@/components/DeployDialog';
 import { DeviceMap } from '@/components/DeviceMap';
 import { useAuth } from '@/providers/AuthProvider';
+
+interface AssignmentResp {
+  current: {
+    id: string;
+    scope: 'company' | 'team' | 'user';
+    teamId: string | null;
+    teamName: string | null;
+    userId: string | null;
+    userName: string | null;
+    userPhone: string | null;
+    createdAt: string;
+  } | null;
+}
 
 export default function DeviceDetailPage({
   params,
@@ -28,6 +42,7 @@ export default function DeviceDetailPage({
   const { user: me } = useAuth();
   const router = useRouter();
   const [showEdit, setShowEdit] = useState(false);
+  const [showDeploy, setShowDeploy] = useState(false);
   const isVendor = me?.role === 'vendor_admin';
   const canEdit = isVendor || me?.role === 'company_admin';
 
@@ -40,6 +55,11 @@ export default function DeviceDetailPage({
     queryKey: ['device', id, 'transfers'],
     queryFn: () =>
       apiRequest<{ items: DeviceTransfer[] }>(`/api/v1/devices/${id}/transfers`),
+  });
+
+  const assignmentQ = useQuery({
+    queryKey: ['device', id, 'assignment'],
+    queryFn: () => apiRequest<AssignmentResp>(`/api/v1/devices/${id}/assignment`),
   });
 
   if (deviceQ.isLoading) {
@@ -79,6 +99,12 @@ export default function DeviceDetailPage({
           action={
             canEdit ? (
               <div className="flex gap-2">
+                {(d.status === 'assigned' || d.status === 'active') ? (
+                  <Button variant="secondary" onClick={() => setShowDeploy(true)}>
+                    <MapPin size={14} />{' '}
+                    {d.status === 'active' ? '更新部署位置' : '现场部署'}
+                  </Button>
+                ) : null}
                 <Button variant="secondary" onClick={() => setShowEdit(true)}>
                   <Pencil size={14} /> 编辑
                 </Button>
@@ -173,6 +199,55 @@ export default function DeviceDetailPage({
           onClose={() => setShowEdit(false)}
           onSaved={() => setShowEdit(false)}
         />
+      ) : null}
+
+      {showDeploy ? (
+        <DeployDialog
+          deviceId={d.id}
+          initialDoorLabel={d.doorLabel}
+          onClose={() => setShowDeploy(false)}
+          onDeployed={() => setShowDeploy(false)}
+        />
+      ) : null}
+
+      {assignmentQ.data?.current ? (
+        <Card>
+          <CardHeader title="当前授权" />
+          <CardBody>
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+              <div>
+                <span className="text-slate-400">范围：</span>
+                <Badge tone={assignmentQ.data.current.scope === 'user' ? 'blue' : 'gray'}>
+                  {assignmentQ.data.current.scope === 'user'
+                    ? '指定人员'
+                    : assignmentQ.data.current.scope === 'team'
+                      ? '整个班组'
+                      : '公司级'}
+                </Badge>
+              </div>
+              {assignmentQ.data.current.teamName ? (
+                <div>
+                  <span className="text-slate-400">班组：</span>
+                  <span className="font-medium">{assignmentQ.data.current.teamName}</span>
+                </div>
+              ) : null}
+              {assignmentQ.data.current.userName ? (
+                <div>
+                  <span className="text-slate-400">人员：</span>
+                  <span className="font-medium">{assignmentQ.data.current.userName}</span>
+                  {assignmentQ.data.current.userPhone ? (
+                    <span className="ml-2 font-mono text-xs text-slate-500">
+                      {assignmentQ.data.current.userPhone}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+              <div className="text-xs text-slate-500">
+                自 {new Date(assignmentQ.data.current.createdAt).toLocaleString('zh-CN')}
+              </div>
+            </div>
+          </CardBody>
+        </Card>
       ) : null}
 
       {(d.locationLat != null || d.locationLng != null) && d.model?.code !== 'ESEAL-LOGI-01' ? (
