@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { AlertTriangle, Boxes, Building2, ClipboardList, Clock3, Cpu, Hash, KeyRound, LayoutDashboard, Lock, LogOut, Plug, Radio, ShieldCheck, UsersRound } from 'lucide-react';
+import { AlertTriangle, Boxes, Building2, ClipboardList, Clock3, Cpu, Hash, KeyRound, LayoutDashboard, Lock, LogOut, Plug, Radio, ShieldCheck, UsersRound, Wrench } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -40,6 +40,12 @@ const items: NavItem[] = [
     label: '锁号生成器',
     icon: Hash,
     roles: ['vendor_admin'],
+  },
+  {
+    href: '/repairs',
+    label: '维修中库',
+    icon: Wrench,
+    roles: ['vendor_admin', 'company_admin', 'production_operator'],
   },
   { href: '/companies', label: '客户公司', icon: Building2, roles: ['vendor_admin'] },
   {

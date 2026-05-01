@@ -673,3 +673,41 @@ export interface TemporaryUnlockPendingItem extends TemporaryUnlock {
   applicant: { id: string; name: string; phone: string };
   device: { id: string; lockId: string; doorLabel: string | null };
 }
+
+// ----- v2.6 Repair flow -----
+
+export interface DeviceRepair {
+  id: string;
+  ulid: string;
+  deviceId: string;
+  sourceCompanyId: string | null;
+  priorStatus: string;
+  faultReason: string;
+  status:
+    | 'intake'
+    | 'diagnosing'
+    | 'repairing'
+    | 'awaiting_parts'
+    | 'repaired'
+    | 'irreparable'
+    | 'returned';
+  intakeByUserId: string | null;
+  repairedByUserId: string | null;
+  notes: string | null;
+  partsReplaced: unknown;
+  intakeAt: string;
+  repairedAt: string | null;
+  closedAt: string | null;
+}
+
+export interface DeviceRepairListItem extends DeviceRepair {
+  device: { id: string; lockId: string; bleMac: string };
+  sourceCompanyName: string | null;
+}
+
+export interface DeviceRepairListResp {
+  items: DeviceRepairListItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}

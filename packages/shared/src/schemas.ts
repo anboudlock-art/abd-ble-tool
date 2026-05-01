@@ -578,3 +578,48 @@ export const GenerateLockNumbersSchema = z.object({
   count: z.coerce.number().int().min(1).max(10_000),
 });
 export type GenerateLockNumbersInput = z.infer<typeof GenerateLockNumbersSchema>;
+
+// -------------------- v2.6 device repair flow --------------------
+
+export const RepairStatusEnum = z.enum([
+  'intake',
+  'diagnosing',
+  'repairing',
+  'awaiting_parts',
+  'repaired',
+  'irreparable',
+  'returned',
+]);
+export type RepairStatusValue = z.infer<typeof RepairStatusEnum>;
+
+export const CreateRepairIntakeSchema = z.object({
+  /// Optional — defaults to the device's current owner_company_id.
+  sourceCompanyId: z.coerce.number().int().positive().optional(),
+  faultReason: z.string().min(1).max(255),
+  notes: z.string().max(2000).optional(),
+});
+export type CreateRepairIntakeInput = z.infer<typeof CreateRepairIntakeSchema>;
+
+export const UpdateRepairStatusSchema = z.object({
+  status: z.enum(['diagnosing', 'repairing', 'awaiting_parts', 'repaired', 'irreparable']),
+  notes: z.string().max(2000).optional(),
+  partsReplaced: z.array(z.string().max(64)).max(50).optional(),
+});
+export type UpdateRepairStatusInput = z.infer<typeof UpdateRepairStatusSchema>;
+
+export const CloseRepairSchema = z.object({
+  /// Where the repaired device should land:
+  ///   restore: back to its prior status (default; for repairable cases)
+  ///   retire:  device → retired (for irreparable cases)
+  resolution: z.enum(['restore', 'retire']).default('restore'),
+  notes: z.string().max(2000).optional(),
+});
+export type CloseRepairInput = z.infer<typeof CloseRepairSchema>;
+
+export const RepairListQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(50),
+  status: RepairStatusEnum.optional(),
+  sourceCompanyId: z.coerce.number().int().positive().optional(),
+});
+export type RepairListQuery = z.infer<typeof RepairListQuerySchema>;
