@@ -609,6 +609,8 @@ export default async function deviceRoutes(app: FastifyInstance) {
           userId: a.userId?.toString() ?? null,
           userName: a.user?.name ?? null,
           userPhone: a.user?.phone ?? null,
+          validFrom: a.validFrom?.toISOString() ?? null,
+          validUntil: a.validUntil?.toISOString() ?? null,
           createdAt: a.createdAt.toISOString(),
         },
       };

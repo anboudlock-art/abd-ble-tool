@@ -217,6 +217,10 @@ export const AssignDevicesSchema = z.object({
   /** Optional: pin the assignment to a specific user inside the team. When
    *  provided, scope is recorded as `user`; otherwise `team`. */
   userId: z.coerce.number().int().positive().optional(),
+  /** Optional time window for the permission. */
+  validFrom: z.coerce.date().optional(),
+  validUntil: z.coerce.date().optional(),
+  maxUses: z.coerce.number().int().nonnegative().optional(),
 });
 export type AssignDevicesInput = z.infer<typeof AssignDevicesSchema>;
 

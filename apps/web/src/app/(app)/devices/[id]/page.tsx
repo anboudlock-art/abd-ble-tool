@@ -29,6 +29,8 @@ interface AssignmentResp {
     userId: string | null;
     userName: string | null;
     userPhone: string | null;
+    validFrom: string | null;
+    validUntil: string | null;
     createdAt: string;
   } | null;
 }
@@ -240,6 +242,20 @@ export default function DeviceDetailPage({
                       {assignmentQ.data.current.userPhone}
                     </span>
                   ) : null}
+                </div>
+              ) : null}
+              {(assignmentQ.data.current.validFrom || assignmentQ.data.current.validUntil) ? (
+                <div>
+                  <span className="text-slate-400">时段：</span>
+                  <span className="font-mono text-xs">
+                    {assignmentQ.data.current.validFrom
+                      ? new Date(assignmentQ.data.current.validFrom).toLocaleString('zh-CN')
+                      : '不限'}
+                    {' — '}
+                    {assignmentQ.data.current.validUntil
+                      ? new Date(assignmentQ.data.current.validUntil).toLocaleString('zh-CN')
+                      : '不限'}
+                  </span>
                 </div>
               ) : null}
               <div className="text-xs text-slate-500">

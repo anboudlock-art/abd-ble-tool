@@ -146,7 +146,7 @@ export default async function deviceTransferRoutes(app: FastifyInstance) {
     },
     async (req) => {
       const ctx = getAuthContext(req);
-      const { deviceIds, teamId, userId } = req.body;
+      const { deviceIds, teamId, userId, validFrom, validUntil } = req.body;
       const ids = deviceIds.map(BigInt);
 
       const team = await prisma.team.findUnique({
@@ -242,6 +242,8 @@ export default async function deviceTransferRoutes(app: FastifyInstance) {
               teamId: team.id,
               userId: targetUser?.id,
               grantedByUserId: ctx.userId,
+              validFrom: validFrom ?? null,
+              validUntil: validUntil ?? null,
             },
           });
           out.push(u);

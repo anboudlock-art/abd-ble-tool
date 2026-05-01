@@ -29,6 +29,8 @@ export function AssignDialog({ selectedDeviceIds, fixedCompanyId, onClose, onAss
   const [companyId, setCompanyId] = useState(fixedCompanyId ?? user?.companyId ?? '');
   const [teamId, setTeamId] = useState('');
   const [userId, setUserId] = useState('');
+  const [validFrom, setValidFrom] = useState('');
+  const [validUntil, setValidUntil] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const companiesQ = useQuery({
@@ -68,6 +70,8 @@ export function AssignDialog({ selectedDeviceIds, fixedCompanyId, onClose, onAss
           deviceIds: selectedDeviceIds.map((s) => Number(s)),
           teamId: Number(teamId),
           ...(userId ? { userId: Number(userId) } : {}),
+          ...(validFrom ? { validFrom: new Date(validFrom).toISOString() } : {}),
+          ...(validUntil ? { validUntil: new Date(validUntil).toISOString() } : {}),
         },
       }),
     onSuccess: () => {
@@ -170,6 +174,35 @@ export function AssignDialog({ selectedDeviceIds, fixedCompanyId, onClose, onAss
               </p>
             ) : null}
           </div>
+
+          {/* 授权时段 */}
+          {userId ? (
+            <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2">
+              <p className="mb-2 text-xs font-medium text-amber-800">
+                授权时段（可选，不限则留空）
+              </p>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="mb-0.5 block text-[11px] text-slate-500">开始时间</label>
+                  <input
+                    type="datetime-local"
+                    value={validFrom}
+                    onChange={(e) => setValidFrom(e.target.value)}
+                    className="block w-full rounded border border-slate-300 px-2 py-1 text-xs"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="mb-0.5 block text-[11px] text-slate-500">结束时间</label>
+                  <input
+                    type="datetime-local"
+                    value={validUntil}
+                    onChange={(e) => setValidUntil(e.target.value)}
+                    className="block w-full rounded border border-slate-300 px-2 py-1 text-xs"
+                  />
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           {error ? (
             <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
