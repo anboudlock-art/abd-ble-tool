@@ -175,6 +175,53 @@ POST /api/v1/devices/1/deploy
 
 ---
 
+---
+
+## Claude 需要的平台参数（由鸿哥提供）
+
+### 短信
+
+| 参数 | 说明 | 谁提供 |
+|---|---|---|
+| `ALIYUN_SMS_ACCESS_KEY_ID` | 阿里云 RAM 子账号 AccessKey（需 SMS 权限） | 鸿哥 |
+| `ALIYUN_SMS_ACCESS_KEY_SECRET` | 对应 Secret | 鸿哥 |
+| `ALIYUN_SMS_SIGN_NAME` | 阿里云短信控制台审核通过的签名，如 "安邦德" | 鸿哥 |
+| 模板 Code | `SMS_XXXXXXXXX`，需在阿里云短信控制台审批通过 | 鸿哥 |
+
+需要的模板（建议）：
+| 用途 | 模板内容示例 | 模板 Code |
+|---|---|---|
+| 低电量告警 | `【安邦德】设备${lockId} 电量仅剩${battery}%，请及时充电。` | 鸿哥去阿里云申请 |
+| 密码重置验证码 | `【安邦德】您的验证码：${code}，5分钟内有效，请勿泄露。` | 鸿哥去阿里云申请 |
+| 设备离线告警 | `【安邦德】设备${lockId} 已离线超过${minutes}分钟，请检查。` | 鸿哥去阿里云申请 |
+| 发货通知 | `【安邦德】您的设备${lockId} 已发货，快递单号${tracking}，请注意查收。` | 鸿哥去阿里云申请 |
+
+### 推送
+
+| 参数 | 说明 | 谁提供 |
+|---|---|---|
+| `HUAWEI_PUSH_APP_ID` | 华为开发者联盟 AppID | 鸿哥 |
+| `HUAWEI_PUSH_APP_SECRET` | 华为推送 Secret Key | 鸿哥 |
+| `XIAOMI_PUSH_APP_SECRET` | 小米推送 AppSecret | 鸿哥 |
+| `APNS_KEY_ID` | Apple Push Key ID（.p8 证书） | 鸿哥 |
+| `APNS_TEAM_ID` | Apple Developer Team ID | 鸿哥 |
+
+> 注意：env key 已在 `.env.example` 中定义好了，鸿哥只需填值。
+
+### 告警→通知 触发规则
+
+在 `apps/worker/src/index.ts` 的告警处理逻辑中已有框架。建议规则：
+
+| 告警级别 | 站内通知 | 短信 | 推送 | 适用场景 |
+|---|:---:|:---:|:---:|---|
+| `critical` | ✅ | ✅ | ✅ | 设备离线超 2h、被破坏、非法开锁 |
+| `warning` | ✅ | ❌ | ❌ | 低电量(≤20%)、信号弱 |
+| `info` | ✅ | ❌ | ❌ | 固件更新、设备入库 |
+
+代码改动只需在 `apps/worker/src/sms.ts` 将 stubProvider 替换为真实 Aliyun SDK。
+
+---
+
 ## 重要注意事项（沿用 Wave 5）
 
 - ⚠️ `apps/web/src/lib/api.ts` baseUrl 保持 `|| ''`，不要改回 `?? 'http://localhost:3001'`
