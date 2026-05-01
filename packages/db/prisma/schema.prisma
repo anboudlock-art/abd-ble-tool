@@ -568,6 +568,10 @@ model ProductionScan {
   firmwareVersionRead  String?   @map("firmware_version_read") @db.VarChar(32)
   qcResult             QcStatus  @default(pending) @map("qc_result")
   qcRemark             String?   @map("qc_remark") @db.VarChar(255)
+  /// 12-item production test results: { itemKey: { pass, value?, note? }, ... }
+  /// Items are documented in shared/schemas.ts ProductionTestItemKeys.
+  /// Stored as JSONB so we can evolve the item set without a migration.
+  testItems            Json?     @map("test_items")
   scannedAt            DateTime  @default(now()) @map("scanned_at")
   durationMs           Int?      @map("duration_ms")
 

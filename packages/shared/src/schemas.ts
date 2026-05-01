@@ -512,3 +512,69 @@ export const ApproveTemporaryUnlockSchema = z.object({
   decisionNote: z.string().max(500).optional(),
 });
 export type ApproveTemporaryUnlockInput = z.infer<typeof ApproveTemporaryUnlockSchema>;
+
+// -------------------- v2.6 production test (12 items) --------------------
+
+/**
+ * Canonical keys for the 12-item production test (v2.6 §2.1).
+ *  6 automated + 2 environmental + 4 manual = 12.
+ * The set is stable inside one batch but may evolve over time, so we store
+ * the test results as JSON keyed by these strings on production_scan.
+ */
+export const ProductionTestItemKeys = [
+  // automated
+  'ble_comm',
+  '4g_uplink',
+  'gps_fix',
+  'battery_voltage',
+  'power_draw',
+  'firmware_version',
+  // environmental
+  'temp_endurance',
+  'waterproof_ip67',
+  // manual
+  'lock_mechanism',
+  'cosmetic',
+  'indicator_lamp',
+  'accessories',
+] as const;
+export type ProductionTestItemKey = (typeof ProductionTestItemKeys)[number];
+
+const TestItemResultSchema = z.object({
+  pass: z.boolean(),
+  /** Optional measured value, e.g. battery=3.84, power=12mA. */
+  value: z.union([z.string(), z.number()]).optional(),
+  note: z.string().max(255).optional(),
+});
+
+export const ProductionTestItemsSchema = z
+  .record(z.enum(ProductionTestItemKeys), TestItemResultSchema)
+  .refine((v) => Object.keys(v).length > 0, 'at least one test item required');
+export type ProductionTestItems = z.infer<typeof ProductionTestItemsSchema>;
+
+/// B2: batch submit production scans. One row per device, allows partial
+/// 12-item result via testItems map.
+export const BatchProductionScanSchema = z.object({
+  scans: z
+    .array(
+      ProductionScanSchema.extend({
+        testItems: ProductionTestItemsSchema.optional(),
+      }),
+    )
+    .min(1)
+    .max(500),
+});
+export type BatchProductionScanInput = z.infer<typeof BatchProductionScanSchema>;
+
+// -------------------- v2.6 lock number generator --------------------
+
+/// 0.2: vendor_admin generates pre-printed lock IDs in batches.
+/// `month` 1-12, `year` 4-digit. lockId = (year mod 10) (month%02d) (seq%05d).
+export const GenerateLockNumbersSchema = z.object({
+  batchId: z.coerce.number().int().positive(),
+  year: z.coerce.number().int().min(2024).max(2099),
+  month: z.coerce.number().int().min(1).max(12),
+  startSeq: z.coerce.number().int().min(1).max(99999).default(1),
+  count: z.coerce.number().int().min(1).max(10_000),
+});
+export type GenerateLockNumbersInput = z.infer<typeof GenerateLockNumbersSchema>;
