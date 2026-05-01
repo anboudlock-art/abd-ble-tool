@@ -428,3 +428,87 @@ export const CreateFirmwareTaskSchema = z.object({
   scheduledAt: z.string().datetime().optional(),
 });
 export type CreateFirmwareTaskInput = z.infer<typeof CreateFirmwareTaskSchema>;
+
+// -------------------- v2.6 Permission requests + temporary unlock --------------------
+
+/// D1: long-term unlock permission for N devices, partial-approval allowed.
+export const CreatePermissionRequestSchema = z.object({
+  deviceIds: z.array(z.coerce.number().int().positive()).min(1).max(200),
+  reason: z.string().min(1).max(500),
+  /// Optional time window the requester wants. null = forever.
+  validFrom: z.string().datetime().optional(),
+  validUntil: z.string().datetime().optional(),
+});
+export type CreatePermissionRequestInput = z.infer<typeof CreatePermissionRequestSchema>;
+
+export const PermissionRequestStatusEnum = z.enum([
+  'pending',
+  'approved',
+  'partial',
+  'rejected',
+  'cancelled',
+]);
+
+export const PermissionRequestListQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  status: PermissionRequestStatusEnum.optional(),
+  /// "mine" = my own (default for non-admin), "company" = whole company (admins).
+  scope: z.enum(['mine', 'company']).default('mine'),
+});
+export type PermissionRequestListQuery = z.infer<typeof PermissionRequestListQuerySchema>;
+
+/// H2: per-item decision payload. Each entry is one device in the request.
+export const ApprovePermissionRequestSchema = z.object({
+  /// Per-device decisions. Items the approver doesn't list keep status=pending,
+  /// which forces them to come back to it (encourages explicit decisions).
+  decisions: z
+    .array(
+      z.object({
+        deviceId: z.coerce.number().int().positive(),
+        decision: z.enum(['approve', 'reject']),
+      }),
+    )
+    .min(1),
+  decisionNote: z.string().max(500).optional(),
+});
+export type ApprovePermissionRequestInput = z.infer<typeof ApprovePermissionRequestSchema>;
+
+/// E1: single-device, time-bounded unlock. Window is one of the four steps
+/// (1h / 2h / 4h / 8h). emergency=true bumps the request to top of queue
+/// and (when SMS is configured) pages approvers.
+export const CreateTemporaryUnlockSchema = z.object({
+  deviceId: z.coerce.number().int().positive(),
+  reason: z.string().min(1).max(500),
+  durationMinutes: z.union([
+    z.literal(60),
+    z.literal(120),
+    z.literal(240),
+    z.literal(480),
+  ]),
+  emergency: z.boolean().default(false),
+});
+export type CreateTemporaryUnlockInput = z.infer<typeof CreateTemporaryUnlockSchema>;
+
+export const TemporaryUnlockStatusEnum = z.enum([
+  'pending',
+  'approved',
+  'rejected',
+  'expired',
+  'revoked',
+  'cancelled',
+]);
+
+export const TemporaryUnlockListQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  status: TemporaryUnlockStatusEnum.optional(),
+  scope: z.enum(['mine', 'company']).default('mine'),
+});
+export type TemporaryUnlockListQuery = z.infer<typeof TemporaryUnlockListQuerySchema>;
+
+export const ApproveTemporaryUnlockSchema = z.object({
+  decision: z.enum(['approve', 'reject']),
+  decisionNote: z.string().max(500).optional(),
+});
+export type ApproveTemporaryUnlockInput = z.infer<typeof ApproveTemporaryUnlockSchema>;

@@ -28,6 +28,7 @@ export const QUEUE_COMMAND_TIMEOUT = 'command-timeout';
 export const QUEUE_NOTIFICATIONS = 'notifications';
 export const QUEUE_OFFLINE_CHECK = 'offline-check';
 export const QUEUE_SMS = 'sms';
+export const QUEUE_TEMP_UNLOCK_SWEEP = 'temp-unlock-sweep';
 
 export const queues = {
   webhookDelivery: new Queue(QUEUE_WEBHOOK_DELIVERY, { connection }),
@@ -35,6 +36,7 @@ export const queues = {
   notifications: new Queue(QUEUE_NOTIFICATIONS, { connection }),
   offlineCheck: new Queue(QUEUE_OFFLINE_CHECK, { connection }),
   sms: new Queue(QUEUE_SMS, { connection }),
+  tempUnlockSweep: new Queue(QUEUE_TEMP_UNLOCK_SWEEP, { connection }),
 };
 
 interface WebhookJob {
@@ -237,6 +239,41 @@ const workers = [
     },
     { connection, concurrency: 1 },
   ),
+
+  /**
+   * Sweep approved temporary unlocks whose validUntil has passed: revoke the
+   * underlying device_assignment and flip status to `expired`. Runs every
+   * minute — short enough that worst-case slop is small, but not so often
+   * that an empty DB churns.
+   */
+  new Worker(
+    QUEUE_TEMP_UNLOCK_SWEEP,
+    async () => {
+      const now = new Date();
+      const expired = await prisma.temporaryUnlock.findMany({
+        where: { status: 'approved', validUntil: { lte: now } },
+        select: { id: true, assignmentId: true },
+      });
+      if (expired.length === 0) return;
+
+      await prisma.$transaction(async (tx) => {
+        for (const t of expired) {
+          if (t.assignmentId) {
+            await tx.deviceAssignment.update({
+              where: { id: t.assignmentId },
+              data: { revokedAt: now },
+            });
+          }
+          await tx.temporaryUnlock.update({
+            where: { id: t.id },
+            data: { status: 'expired' },
+          });
+        }
+      });
+      log.info({ expiredCount: expired.length }, 'temp-unlock expired');
+    },
+    { connection, concurrency: 1 },
+  ),
 ];
 
 // Fan-out: subscribe to Redis pub/sub channels.
@@ -323,6 +360,14 @@ await queues.offlineCheck.add(
   {
     repeat: { every: 5 * 60 * 1000 }, // every 5 minutes
     jobId: 'offline-sweep-singleton',
+  },
+);
+await queues.tempUnlockSweep.add(
+  'temp-unlock-sweep',
+  {},
+  {
+    repeat: { every: 60 * 1000 }, // every minute
+    jobId: 'temp-unlock-sweep-singleton',
   },
 );
 
