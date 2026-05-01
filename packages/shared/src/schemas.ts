@@ -214,8 +214,23 @@ export type AddTeamMemberInput = z.infer<typeof AddTeamMemberSchema>;
 export const AssignDevicesSchema = z.object({
   deviceIds: z.array(z.coerce.number().int().positive()).min(1).max(1000),
   teamId: z.coerce.number().int().positive(),
+  /** Optional: pin the assignment to a specific user inside the team. When
+   *  provided, scope is recorded as `user`; otherwise `team`. */
+  userId: z.coerce.number().int().positive().optional(),
 });
 export type AssignDevicesInput = z.infer<typeof AssignDevicesSchema>;
+
+export const DeployDeviceSchema = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  accuracyM: z.coerce.number().int().nonnegative().optional(),
+  doorLabel: z.string().min(1).max(128).optional(),
+  photoUrls: z.array(z.string().url()).max(9).optional(),
+  /** Optional team to bind the deployment to (defaults to the device's
+   *  current team). */
+  teamId: z.coerce.number().int().positive().optional(),
+});
+export type DeployDeviceInput = z.infer<typeof DeployDeviceSchema>;
 
 export const DeviceCommandRequestSchema = z.object({
   commandType: z.enum(['unlock', 'lock', 'query_status']),

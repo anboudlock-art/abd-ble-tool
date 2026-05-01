@@ -6,10 +6,12 @@ import { prisma } from '@abd/db';
 import {
   ApiError,
   CreateTestDeviceSchema,
+  DeployDeviceSchema,
   DeviceListQuerySchema,
   UpdateDeviceSchema,
 } from '@abd/shared';
 import { getAuthContext, requireRole, scopeToCompany } from '../lib/auth.js';
+import { assertTransition } from '../domain/device-state-machine.js';
 
 export default async function deviceRoutes(app: FastifyInstance) {
   const typed = app.withTypeProvider<ZodTypeProvider>();
@@ -457,6 +459,159 @@ export default async function deviceRoutes(app: FastifyInstance) {
         data: { deletedAt: new Date(), status: 'retired' },
       });
       reply.code(204);
+    },
+  );
+
+  /**
+   * Field deployment — operator on-site marks a device as installed at a
+   * physical location. Transitions: assigned → active.
+   */
+  typed.post(
+    '/devices/:id/deploy',
+    {
+      onRequest: [app.authenticate],
+      schema: {
+        params: z.object({ id: z.coerce.number().int().positive() }),
+        body: DeployDeviceSchema,
+      },
+    },
+    async (req, reply) => {
+      const ctx = getAuthContext(req);
+      const id = BigInt(req.params.id);
+      const device = await prisma.device.findUnique({ where: { id } });
+      if (!device || device.deletedAt) throw ApiError.notFound();
+
+      // Company scoping (vendor_admin bypasses).
+      const scope = scopeToCompany(ctx);
+      if (scope.companyId && device.ownerCompanyId !== scope.companyId) {
+        throw ApiError.forbidden();
+      }
+      // Only roles that operate physical hardware should be deploying.
+      if (
+        ctx.role !== 'vendor_admin' &&
+        ctx.role !== 'company_admin' &&
+        ctx.role !== 'dept_admin' &&
+        ctx.role !== 'team_leader' &&
+        ctx.role !== 'member' &&
+        ctx.role !== 'production_operator'
+      ) {
+        throw ApiError.forbidden();
+      }
+
+      // Allow re-deploying an already-active device (relocations) without
+      // bouncing through assigned again.
+      if (device.status !== 'assigned' && device.status !== 'active') {
+        throw ApiError.conflict(
+          `Device must be assigned/active to deploy (current: ${device.status})`,
+        );
+      }
+
+      const { lat, lng, accuracyM, doorLabel, photoUrls, teamId } = req.body;
+      const targetTeamId = teamId ? BigInt(teamId) : device.currentTeamId;
+      if (targetTeamId) {
+        const t = await prisma.team.findUnique({ where: { id: targetTeamId } });
+        if (!t) throw ApiError.notFound('Team not found');
+        if (scope.companyId && t.companyId !== scope.companyId) {
+          throw ApiError.forbidden();
+        }
+      }
+
+      const now = new Date();
+      const updated = await prisma.$transaction(async (tx) => {
+        if (device.status === 'assigned') assertTransition('assigned', 'active');
+        const u = await tx.device.update({
+          where: { id },
+          data: {
+            status: 'active',
+            locationLat: lat,
+            locationLng: lng,
+            locationAccuracyM: accuracyM ?? null,
+            doorLabel: doorLabel ?? device.doorLabel,
+            deployedAt: now,
+            deployedByUserId: ctx.userId,
+          },
+        });
+        await tx.deviceDeployment.create({
+          data: {
+            deviceId: id,
+            operatorUserId: ctx.userId,
+            teamId: targetTeamId,
+            lat,
+            lng,
+            accuracyM,
+            doorLabel,
+            photoUrls: photoUrls as never,
+            deployedAt: now,
+          },
+        });
+        if (device.status === 'assigned') {
+          await tx.deviceTransfer.create({
+            data: {
+              deviceId: id,
+              fromStatus: 'assigned',
+              toStatus: 'active',
+              operatorUserId: ctx.userId,
+              reason: 'deploy',
+              metadata: { lat, lng, doorLabel: doorLabel ?? null },
+            },
+          });
+        }
+        return u;
+      });
+
+      reply.code(200);
+      return {
+        id: updated.id.toString(),
+        status: updated.status,
+        deployedAt: updated.deployedAt?.toISOString() ?? null,
+        locationLat: updated.locationLat?.toString() ?? null,
+        locationLng: updated.locationLng?.toString() ?? null,
+        doorLabel: updated.doorLabel,
+      };
+    },
+  );
+
+  /**
+   * Latest assignment for a device — returns the most recent non-revoked
+   * assignment row, with the team / user it points to. Used by the device
+   * detail page to show "currently authorised: 张三 (工程班 1 组)".
+   */
+  typed.get(
+    '/devices/:id/assignment',
+    {
+      onRequest: [app.authenticate],
+      schema: { params: z.object({ id: z.coerce.number().int().positive() }) },
+    },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const id = BigInt(req.params.id);
+      const device = await prisma.device.findUnique({ where: { id } });
+      if (!device) throw ApiError.notFound();
+      const scope = scopeToCompany(ctx);
+      if (scope.companyId && device.ownerCompanyId !== scope.companyId) {
+        throw ApiError.forbidden();
+      }
+      const a = await prisma.deviceAssignment.findFirst({
+        where: { deviceId: id, revokedAt: null },
+        orderBy: { id: 'desc' },
+        include: {
+          team: { select: { id: true, name: true } },
+          user: { select: { id: true, name: true, phone: true } },
+        },
+      });
+      if (!a) return { current: null };
+      return {
+        current: {
+          id: a.id.toString(),
+          scope: a.scope,
+          teamId: a.teamId?.toString() ?? null,
+          teamName: a.team?.name ?? null,
+          userId: a.userId?.toString() ?? null,
+          userName: a.user?.name ?? null,
+          userPhone: a.user?.phone ?? null,
+          createdAt: a.createdAt.toISOString(),
+        },
+      };
     },
   );
 }

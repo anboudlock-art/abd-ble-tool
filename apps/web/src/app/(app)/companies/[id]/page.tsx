@@ -3,8 +3,14 @@
 import { use, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Plus, Users } from 'lucide-react';
-import { apiRequest, ApiClientError, type CompanyDetail, type UserListResp } from '@/lib/api';
+import { ArrowLeft, Plus, Trash2, UserPlus, Users } from 'lucide-react';
+import {
+  apiRequest,
+  ApiClientError,
+  type CompanyDetail,
+  type UserListResp,
+  type UserSummary,
+} from '@/lib/api';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Table, THead, TBody, Tr, Th, Td, EmptyState } from '@/components/ui/Table';
 import { Button } from '@/components/ui/Button';
@@ -16,6 +22,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
   const qc = useQueryClient();
   const [showDeptForm, setShowDeptForm] = useState(false);
   const [showTeamFormForDept, setShowTeamFormForDept] = useState<string | null>(null);
+  const [openMembersForTeam, setOpenMembersForTeam] = useState<string | null>(null);
 
   const companyQ = useQuery({
     queryKey: ['company', id],
@@ -150,16 +157,30 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                 ) : (
                   <div className="divide-y divide-slate-100">
                     {d.teams.map((t) => (
-                      <div
-                        key={t.id}
-                        className="flex items-center justify-between px-4 py-2.5 text-sm"
-                      >
-                        <div>
-                          <span className="font-medium">{t.name}</span>
-                          <span className="ml-3 inline-flex items-center gap-1 text-xs text-slate-500">
-                            <Users size={12} /> {t.memberCount} 人
-                          </span>
+                      <div key={t.id} className="px-4 py-2.5 text-sm">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="font-medium">{t.name}</span>
+                            <span className="ml-3 inline-flex items-center gap-1 text-xs text-slate-500">
+                              <Users size={12} /> {t.memberCount} 人
+                            </span>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            onClick={() =>
+                              setOpenMembersForTeam((v) => (v === t.id ? null : t.id))
+                            }
+                          >
+                            {openMembersForTeam === t.id ? '收起' : '管理成员'}
+                          </Button>
                         </div>
+                        {openMembersForTeam === t.id ? (
+                          <TeamMembersPanel
+                            teamId={t.id}
+                            companyId={id}
+                            allCompanyUsers={usersQ.data?.items ?? []}
+                          />
+                        ) : null}
                       </div>
                     ))}
                   </div>
@@ -298,5 +319,151 @@ function TeamForm({
         取消
       </Button>
     </form>
+  );
+}
+
+interface TeamMember {
+  userId: string;
+  name: string;
+  phone: string;
+  role: string;
+  roleInTeam: string;
+  joinedAt: string;
+}
+
+/**
+ * Inline panel for adding/removing members of a team. Lists current
+ * members, plus a dropdown of company users not yet in the team.
+ */
+function TeamMembersPanel({
+  teamId,
+  companyId,
+  allCompanyUsers,
+}: {
+  teamId: string;
+  companyId: string;
+  allCompanyUsers: UserSummary[];
+}) {
+  const qc = useQueryClient();
+  const [pickedUserId, setPickedUserId] = useState('');
+  const [pickedRole, setPickedRole] = useState<'leader' | 'member'>('member');
+  const [error, setError] = useState<string | null>(null);
+
+  const membersQ = useQuery({
+    queryKey: ['team-members', teamId],
+    queryFn: () => apiRequest<{ items: TeamMember[] }>(`/api/v1/teams/${teamId}/members`),
+  });
+
+  const addMember = useMutation({
+    mutationFn: (vars: { userId: string; roleInTeam: 'leader' | 'member' }) =>
+      apiRequest(`/api/v1/teams/${teamId}/members`, {
+        method: 'POST',
+        body: { userId: Number(vars.userId), roleInTeam: vars.roleInTeam },
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['team-members', teamId] });
+      void qc.invalidateQueries({ queryKey: ['company', companyId] });
+      setPickedUserId('');
+    },
+    onError: (e) => setError(e instanceof ApiClientError ? e.body.message : '添加失败'),
+  });
+
+  const removeMember = useMutation({
+    mutationFn: (userId: string) =>
+      apiRequest(`/api/v1/teams/${teamId}/members/${userId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['team-members', teamId] });
+      void qc.invalidateQueries({ queryKey: ['company', companyId] });
+    },
+    onError: (e) => setError(e instanceof ApiClientError ? e.body.message : '移除失败'),
+  });
+
+  const memberIds = new Set(membersQ.data?.items.map((m) => m.userId) ?? []);
+  const candidates = allCompanyUsers.filter((u) => !memberIds.has(u.id));
+
+  return (
+    <div className="mt-3 rounded border border-slate-200 bg-slate-50 p-3">
+      {error ? (
+        <div className="mb-2 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          {error}
+        </div>
+      ) : null}
+
+      <div className="mb-3 flex flex-wrap items-end gap-2">
+        <div>
+          <label className="mb-1 block text-xs text-slate-600">添加成员</label>
+          <select
+            value={pickedUserId}
+            onChange={(e) => setPickedUserId(e.target.value)}
+            className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm"
+          >
+            <option value="">— 选择公司人员 —</option>
+            {candidates.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name} ({u.phone})
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs text-slate-600">在班组的角色</label>
+          <select
+            value={pickedRole}
+            onChange={(e) => setPickedRole(e.target.value as 'leader' | 'member')}
+            className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm"
+          >
+            <option value="member">成员</option>
+            <option value="leader">组长</option>
+          </select>
+        </div>
+        <Button
+          disabled={!pickedUserId}
+          loading={addMember.isPending}
+          onClick={() => {
+            setError(null);
+            addMember.mutate({ userId: pickedUserId, roleInTeam: pickedRole });
+          }}
+        >
+          <UserPlus size={14} /> 添加
+        </Button>
+      </div>
+
+      {membersQ.isLoading ? (
+        <div className="text-xs text-slate-400">加载中…</div>
+      ) : !membersQ.data?.items.length ? (
+        <div className="text-xs text-slate-500">该班组暂无成员</div>
+      ) : (
+        <ul className="space-y-1">
+          {membersQ.data.items.map((m) => (
+            <li
+              key={m.userId}
+              className="flex items-center justify-between rounded bg-white px-3 py-1.5 text-sm"
+            >
+              <div>
+                <span className="font-medium">{m.name}</span>
+                <span className="ml-2 font-mono text-xs text-slate-500">{m.phone}</span>
+                {m.roleInTeam === 'leader' ? (
+                  <Badge tone="amber" className="ml-2">
+                    组长
+                  </Badge>
+                ) : null}
+              </div>
+              <button
+                title="移除"
+                onClick={() => {
+                  if (confirm(`移除 ${m.name}？已分配的设备将自动降级到整个班组可见`)) {
+                    setError(null);
+                    removeMember.mutate(m.userId);
+                  }
+                }}
+                className="text-slate-400 hover:text-red-600"
+              >
+                <Trash2 size={14} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
