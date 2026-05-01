@@ -364,3 +364,47 @@ export const CreateTestDeviceSchema = z.object({
   activate: z.boolean().default(true),
 });
 export type CreateTestDeviceInput = z.infer<typeof CreateTestDeviceSchema>;
+
+// -------------------- OTA / Firmware --------------------
+
+export const FirmwarePackageStatusEnum = z.enum(['draft', 'released', 'archived']);
+export const FirmwareTaskStatusEnum = z.enum([
+  'queued',
+  'pushing',
+  'succeeded',
+  'failed',
+  'cancelled',
+]);
+
+export const CreateFirmwarePackageSchema = z.object({
+  modelId: z.coerce.number().int().positive(),
+  /** semver-ish version, e.g. "1.2.3" or "v10". Unique per modelId. */
+  version: z
+    .string()
+    .min(1)
+    .max(32)
+    .regex(/^[A-Za-z0-9._+-]+$/, 'version must be alphanumeric / dots / dashes'),
+  /** http(s):// or oss:// URL where the binary lives. */
+  url: z.string().url().max(512),
+  /** lower-case hex SHA-256 of the binary, 64 chars. */
+  sha256: z.string().regex(/^[0-9a-f]{64}$/, 'sha256 must be 64 lowercase hex chars'),
+  sizeBytes: z.coerce.number().int().positive().max(64 * 1024 * 1024),
+  changelog: z.string().max(4000).optional(),
+  /** Optional company scope; vendor admins can leave null for global. */
+  companyId: z.coerce.number().int().positive().optional().nullable(),
+});
+export type CreateFirmwarePackageInput = z.infer<typeof CreateFirmwarePackageSchema>;
+
+export const FirmwarePackageListQuerySchema = PaginationSchema.extend({
+  modelId: z.coerce.number().int().positive().optional(),
+  status: FirmwarePackageStatusEnum.optional(),
+});
+export type FirmwarePackageListQuery = z.infer<typeof FirmwarePackageListQuerySchema>;
+
+export const CreateFirmwareTaskSchema = z.object({
+  packageId: z.coerce.number().int().positive(),
+  /** One or more devices to push the firmware to. Same model as the package. */
+  deviceIds: z.array(z.coerce.number().int().positive()).min(1).max(1000),
+  scheduledAt: z.string().datetime().optional(),
+});
+export type CreateFirmwareTaskInput = z.infer<typeof CreateFirmwareTaskSchema>;

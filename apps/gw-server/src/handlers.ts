@@ -1,5 +1,5 @@
 import { Gateway, Lora } from '@abd/proto';
-import { notify, prisma } from '@abd/db';
+import { alarmFanout, prisma } from '@abd/db';
 import type { GatewaySession } from './session.js';
 import { publishLockEvent } from './pubsub.js';
 
@@ -202,11 +202,11 @@ async function raiseAlarm(args: {
       dedupKey,
     },
   });
-  // Fan out an in-app notification to the device's company (or to vendor
-  // admins if the device is still vendor-owned).
-  await notify({
+  // Fan out: in-app + (for critical) SMS to admins of the device's
+  // company.
+  await alarmFanout({
     companyId: args.companyId,
-    kind: 'alarm',
+    severity: args.severity,
     title:
       args.severity === 'critical'
         ? '设备严重告警'

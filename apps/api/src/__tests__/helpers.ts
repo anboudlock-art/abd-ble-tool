@@ -16,6 +16,8 @@ export async function resetDb(): Promise<void> {
       webhook_subscription,
       integration_app,
       audit_log,
+      device_firmware_task,
+      firmware_package,
       device_command,
       lock_event,
       device_deployment,

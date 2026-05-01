@@ -202,6 +202,7 @@ model DeviceModel {
 
   devices           Device[]
   batches           ProductionBatch[]
+  firmwarePackages  FirmwarePackage[]
 
   @@map("device_model")
 }
@@ -752,4 +753,83 @@ model SystemConfig {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("system_config")
+}
+
+// ============================================================
+// OTA / Firmware
+// ============================================================
+
+enum FirmwarePackageStatus {
+  draft
+  released
+  archived
+}
+
+/// A signed/uploaded firmware binary that can be pushed to one or more devices.
+/// Vendor admins (or company admins for their own scoped packages) can register
+/// new packages. The actual binary lives in object storage; we just record
+/// metadata + checksum.
+model FirmwarePackage {
+  id              BigInt                 @id @default(autoincrement())
+  ulid            String                 @unique @default(cuid())
+  /// Optional company scope — null = vendor-global package available to every
+  /// company, non-null = only visible inside that company.
+  companyId       BigInt?                @map("company_id")
+  /// Which device model this firmware targets.
+  modelId         BigInt                 @map("model_id")
+  version         String                 @db.VarChar(32)
+  /// Object-storage URL/path the device-side updater will fetch from.
+  url             String                 @db.VarChar(512)
+  /// SHA-256 hex digest of the binary; the device verifies before flashing.
+  sha256          String                 @db.VarChar(64)
+  sizeBytes       Int                    @map("size_bytes")
+  changelog       String?                @db.Text
+  status          FirmwarePackageStatus  @default(draft)
+  uploadedByUserId BigInt?               @map("uploaded_by_user_id")
+  releasedAt      DateTime?              @map("released_at")
+  createdAt       DateTime               @default(now()) @map("created_at")
+  updatedAt       DateTime               @updatedAt @map("updated_at")
+  deletedAt       DateTime?              @map("deleted_at")
+
+  model           DeviceModel            @relation(fields: [modelId], references: [id])
+  tasks           DeviceFirmwareTask[]
+
+  @@unique([modelId, version])
+  @@index([companyId])
+  @@index([status])
+  @@map("firmware_package")
+}
+
+enum FirmwareTaskStatus {
+  queued
+  pushing
+  succeeded
+  failed
+  cancelled
+}
+
+/// Per-device OTA task. One row per (device, package). The actual delivery is
+/// handled by a worker that pulls queued tasks and downlinks via 4G/BLE/LoRa.
+model DeviceFirmwareTask {
+  id            BigInt              @id @default(autoincrement())
+  packageId     BigInt              @map("package_id")
+  deviceId      BigInt              @map("device_id")
+  status        FirmwareTaskStatus  @default(queued)
+  /// Last reported progress (0–100).
+  progress      Int                 @default(0)
+  errorMessage  String?             @map("error_message") @db.VarChar(255)
+  scheduledAt   DateTime?           @map("scheduled_at")
+  startedAt     DateTime?           @map("started_at")
+  finishedAt    DateTime?           @map("finished_at")
+  /// Who triggered the OTA push.
+  triggeredByUserId BigInt?         @map("triggered_by_user_id")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+
+  package       FirmwarePackage     @relation(fields: [packageId], references: [id])
+
+  @@unique([packageId, deviceId])
+  @@index([deviceId, createdAt(sort: Desc)])
+  @@index([status])
+  @@map("device_firmware_task")
 }

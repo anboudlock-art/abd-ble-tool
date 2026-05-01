@@ -53,6 +53,10 @@ export class ApiError extends Error {
     return new ApiError(409, ApiErrorCode.CONFLICT, msg);
   }
 
+  static badRequest(msg = 'Bad request', details?: unknown) {
+    return new ApiError(400, ApiErrorCode.VALIDATION_ERROR, msg, details);
+  }
+
   static unsupportedOnDevice(msg = 'Feature not supported on this device') {
     return new ApiError(405, ApiErrorCode.DEVICE_FEATURE_UNSUPPORTED, msg);
   }
