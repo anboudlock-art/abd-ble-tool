@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
+import { randomInt } from 'node:crypto';
+import bcrypt from 'bcryptjs';
 import { prisma } from '@abd/db';
 import {
   ApiError,
@@ -72,27 +74,96 @@ export default async function companyRoutes(app: FastifyInstance) {
     },
     async (req, reply) => {
       const ctx = getAuthContext(req);
-      const { name, shortCode, industry, contactName, contactPhone } = req.body;
+      const {
+        name,
+        shortCode,
+        industry,
+        contactName,
+        contactPhone,
+        adminPhone,
+        adminName,
+        adminPassword,
+      } = req.body;
 
       if (shortCode) {
         const dup = await prisma.company.findUnique({ where: { shortCode } });
         if (dup) throw ApiError.conflict(`shortCode '${shortCode}' already in use`);
       }
+      // Pre-flight phone check so we don't half-create a company and then
+      // fail on the user.
+      if (adminPhone) {
+        const dupUser = await prisma.user.findUnique({ where: { phone: adminPhone } });
+        if (dupUser) {
+          throw ApiError.conflict(`Phone ${adminPhone} already registered`);
+        }
+      }
 
-      const c = await prisma.company.create({
-        data: {
-          name,
-          shortCode,
-          industry,
-          contactName,
-          contactPhone,
-          createdByUserId: ctx.userId,
-        },
+      const tempPassword = adminPhone
+        ? adminPassword?.trim() || generateTempPassword()
+        : null;
+
+      const result = await prisma.$transaction(async (tx) => {
+        const c = await tx.company.create({
+          data: {
+            name,
+            shortCode,
+            industry,
+            contactName,
+            contactPhone,
+            createdByUserId: ctx.userId,
+          },
+        });
+
+        let admin: { id: bigint; name: string; phone: string } | null = null;
+        if (adminPhone && tempPassword) {
+          const hash = await bcrypt.hash(tempPassword, 12);
+          const u = await tx.user.create({
+            data: {
+              companyId: c.id,
+              phone: adminPhone,
+              name: adminName ?? `${name} 管理员`,
+              role: 'company_admin',
+              passwordHash: hash,
+              status: 'active',
+              mustChangePassword: true,
+            },
+          });
+          admin = { id: u.id, name: u.name, phone: u.phone };
+        }
+        return { c, admin };
       });
+
       reply.code(201);
-      return { id: c.id.toString(), name: c.name, shortCode: c.shortCode };
+      return {
+        id: result.c.id.toString(),
+        name: result.c.name,
+        shortCode: result.c.shortCode,
+        // Returned ONCE so the vendor can pass it on to the customer.
+        // First-login flow will force a change so the temp value is
+        // single-use anyway.
+        adminAccount: result.admin
+          ? {
+              id: result.admin.id.toString(),
+              name: result.admin.name,
+              phone: result.admin.phone,
+              initialPassword: tempPassword!,
+            }
+          : null,
+      };
     },
   );
+
+  /** Same temp-password generator used by /users — duplicated here to keep
+   *  companies.ts self-contained. Moves once we have a shared util module. */
+  function generateTempPassword(): string {
+    const digits = '0123456789';
+    const letters = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz';
+    const symbols = '!@#$';
+    const pick = (alphabet: string, n: number) =>
+      Array.from({ length: n }, () => alphabet[randomInt(alphabet.length)]).join('');
+    const raw = pick(digits, 4) + pick(letters, 4) + pick(symbols, 2);
+    return raw.split('').sort(() => randomInt(2) - 0.5).join('');
+  }
 
   typed.get(
     '/companies/:id',

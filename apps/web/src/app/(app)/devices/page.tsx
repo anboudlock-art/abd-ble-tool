@@ -92,7 +92,7 @@ export default function DevicesPage() {
   const batchesQ = useQuery({
     queryKey: ['production-batches', { all: true }],
     queryFn: () =>
-      apiRequest<BatchListResp>('/api/v1/production-batches', {
+      apiRequest<BatchListResp>('/api/v1/production/batches', {
         query: { pageSize: 200 },
       }),
   });

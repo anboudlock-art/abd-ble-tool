@@ -96,6 +96,7 @@ model Team {
 
   company       Company    @relation(fields: [companyId], references: [id])
   department    Department @relation(fields: [departmentId], references: [id])
+  leader        User?      @relation("TeamLeader", fields: [leaderUserId], references: [id])
   memberships   UserMembership[]
   devices       Device[]
   assignments   DeviceAssignment[]
@@ -130,7 +131,7 @@ model User {
   name          String     @db.VarChar(64)
   employeeNo    String?    @map("employee_no") @db.VarChar(32)
   passwordHash  String?    @map("password_hash") @db.VarChar(255)
-  mustChangePassword Boolean @default(false) @map("must_change_password")
+  mustChangePassword Boolean @default(true) @map("must_change_password")
   role          UserRole   @default(member)
   status        UserStatus @default(active)
   lastLoginAt   DateTime?  @map("last_login_at")
@@ -148,6 +149,7 @@ model User {
   auditLogs       AuditLog[]
   permissionRequests PermissionRequest[] @relation("PermissionRequestApplicant")
   temporaryUnlocks   TemporaryUnlock[]   @relation("TemporaryUnlockApplicant")
+  ledTeams           Team[]              @relation("TeamLeader")
 
   @@index([companyId])
   @@index([role])

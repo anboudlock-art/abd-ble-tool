@@ -655,7 +655,13 @@ export default async function deviceRoutes(app: FastifyInstance) {
   typed.get(
     '/authorizations',
     {
-      onRequest: [app.authenticate],
+      // Management view — never exposed to plain members. Admin roles only.
+      // scopeToCompany() below also filters by companyId so a company_admin
+      // can only see their own company's authorizations, never anyone else's.
+      onRequest: [
+        app.authenticate,
+        requireRole('vendor_admin', 'company_admin', 'dept_admin', 'team_leader'),
+      ],
       schema: {
         querystring: z.object({
           page: z.coerce.number().int().min(1).default(1),

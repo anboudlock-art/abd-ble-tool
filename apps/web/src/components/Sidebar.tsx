@@ -1,8 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { apiRequest, viewAsStorage, type CompanyListResp } from '@/lib/api';
 import {
   AlertTriangle,
   Boxes,
@@ -185,7 +187,10 @@ function visibleItems(items: NavItem[], role: string | undefined): NavItem[] {
 
 export function Sidebar() {
   const pathname = usePathname() ?? '';
+  const router = useRouter();
+  const qc = useQueryClient();
   const { user, logout } = useAuth();
+  const isVendor = user?.role === 'vendor_admin';
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(
       groups
@@ -194,6 +199,39 @@ export function Sidebar() {
     ),
   );
 
+  // Vendor view-as-company state. Mirrored from localStorage so it
+  // survives reloads and stays in sync across components.
+  const [viewAs, setViewAs] = useState<string>(() => viewAsStorage.get() ?? '');
+  useEffect(() => {
+    const sync = () => setViewAs(viewAsStorage.get() ?? '');
+    window.addEventListener('abd:view-as-changed', sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener('abd:view-as-changed', sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
+
+  const companiesQ = useQuery({
+    queryKey: ['companies', { sidebar: true }],
+    queryFn: () =>
+      apiRequest<CompanyListResp>('/api/v1/companies', { query: { pageSize: 200 } }),
+    enabled: isVendor,
+  });
+
+  function applyViewAs(next: string) {
+    setViewAs(next);
+    viewAsStorage.set(next || null);
+    // Every server-side query depends on which company we're scoped to;
+    // wipe the cache so nothing stale leaks across the swap.
+    qc.invalidateQueries();
+    router.refresh();
+  }
+
+  // When viewing as a company, pretend to be company_admin so the sidebar
+  // hides厂商-only sections (锁号生成 / 客户公司 / 三库总览 …).
+  const effectiveRole = isVendor && viewAs ? 'company_admin' : user?.role;
+
   return (
     <aside className="flex h-screen w-56 shrink-0 flex-col border-r border-slate-200 bg-white">
       <div className="px-5 py-5">
@@ -201,9 +239,37 @@ export function Sidebar() {
         <div className="text-xs text-slate-500">智能锁管理平台</div>
       </div>
 
+      {isVendor && (companiesQ.data?.items.length ?? 0) > 0 ? (
+        <div className="px-3 pb-2">
+          <label className="mb-1 block text-[10px] uppercase tracking-wider text-slate-500">
+            视角
+          </label>
+          <select
+            value={viewAs}
+            onChange={(e) => applyViewAs(e.target.value)}
+            className="block w-full truncate rounded-md border border-slate-300 bg-white px-2 py-1 text-xs"
+          >
+            <option value="">🏭 厂商总览</option>
+            {companiesQ.data?.items.map((c) => (
+              <option key={c.id} value={c.id}>
+                👁 {c.name}
+              </option>
+            ))}
+          </select>
+          {viewAs ? (
+            <button
+              onClick={() => applyViewAs('')}
+              className="mt-1 w-full text-left text-[10px] text-amber-600 hover:underline"
+            >
+              退出客户视角
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       <nav className="flex-1 overflow-y-auto px-3 pb-2">
         {groups.map((g) => {
-          const items = visibleItems(g.items, user?.role);
+          const items = visibleItems(g.items, effectiveRole);
           if (items.length === 0) return null;
 
           // Ungrouped (e.g. 概览)

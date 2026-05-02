@@ -58,7 +58,12 @@ export default async function deviceManagementRoutes(app: FastifyInstance) {
               code: true,
               teams: {
                 where: { deletedAt: null },
-                select: { id: true, name: true },
+                select: {
+                  id: true,
+                  name: true,
+                  leaderUserId: true,
+                  leader: { select: { id: true, name: true, phone: true } },
+                },
                 orderBy: { id: 'asc' },
               },
             },
@@ -100,6 +105,9 @@ export default async function deviceManagementRoutes(app: FastifyInstance) {
           return {
             id: tid,
             name: t.name,
+            leaderUserId: t.leaderUserId?.toString() ?? null,
+            leaderName: t.leader?.name ?? null,
+            leaderPhone: t.leader?.phone ?? null,
             deviceCount: deviceByTeam.get(tid) ?? 0,
             memberCount: memberByTeam.get(tid) ?? 0,
           };

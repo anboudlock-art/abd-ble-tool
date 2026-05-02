@@ -5,6 +5,7 @@
 
 const TOKEN_KEY = 'abd:access_token';
 const REFRESH_TOKEN_KEY = 'abd:refresh_token';
+const VIEW_AS_KEY = 'abd:view_as_company';
 
 export interface ApiErrorBody {
   code: string;
@@ -43,6 +44,27 @@ export const tokenStorage = {
     if (typeof window === 'undefined') return;
     window.localStorage.removeItem(TOKEN_KEY);
     window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+    window.localStorage.removeItem(VIEW_AS_KEY);
+  },
+};
+
+/**
+ * v2.7 vendor "view-as-company": when a vendor_admin selects a customer
+ * from the sidebar switcher we stash the id here. Every outgoing API
+ * request then carries it as X-View-As-Company so the backend can scope
+ * results to that company.
+ */
+export const viewAsStorage = {
+  get(): string | null {
+    if (typeof window === 'undefined') return null;
+    return window.localStorage.getItem(VIEW_AS_KEY);
+  },
+  set(companyId: string | null) {
+    if (typeof window === 'undefined') return;
+    if (companyId) window.localStorage.setItem(VIEW_AS_KEY, companyId);
+    else window.localStorage.removeItem(VIEW_AS_KEY);
+    // Cross-tab + same-tab broadcast so React components can react.
+    window.dispatchEvent(new CustomEvent('abd:view-as-changed'));
   },
 };
 
@@ -100,6 +122,8 @@ export async function downloadFile(
   const headers = new Headers({ Accept: '*/*' });
   const token = tokenStorage.get();
   if (token) headers.set('Authorization', `Bearer ${token}`);
+  const viewAs = viewAsStorage.get();
+  if (viewAs) headers.set('X-View-As-Company', viewAs);
 
   const url = new URL(
     path.startsWith('http') ? path : (baseUrl || '') + path,
@@ -151,6 +175,10 @@ export async function apiRequest<T = unknown>(
   }
   const token = tokenStorage.get();
   if (token) headers.set('Authorization', `Bearer ${token}`);
+  // Vendor "view-as-company" — backend's scopeToCompany() ignores this
+  // header for non-vendor users, so it's safe to attach unconditionally.
+  const viewAs = viewAsStorage.get();
+  if (viewAs) headers.set('X-View-As-Company', viewAs);
 
   let url: string;
   if (path.startsWith('http')) {
@@ -745,6 +773,9 @@ export interface AuthorizationListResp {
 export interface OrgTeam {
   id: string;
   name: string;
+  leaderUserId: string | null;
+  leaderName: string | null;
+  leaderPhone: string | null;
   deviceCount: number;
   memberCount: number;
 }

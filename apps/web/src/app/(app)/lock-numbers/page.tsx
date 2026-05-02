@@ -47,7 +47,7 @@ export default function LockNumbersPage() {
   const batchesQ = useQuery({
     queryKey: ['production-batches', { all: true }],
     queryFn: () =>
-      apiRequest<BatchListResp>('/api/v1/production-batches', {
+      apiRequest<BatchListResp>('/api/v1/production/batches', {
         query: { pageSize: 200 },
       }),
   });
@@ -56,7 +56,7 @@ export default function LockNumbersPage() {
     queryKey: ['lock-numbers', selectedBatchId],
     queryFn: () =>
       apiRequest<LockNumberListResp>(
-        `/api/v1/production-batches/${selectedBatchId}/lock-numbers`,
+        `/api/v1/production/batches/${selectedBatchId}/lock-numbers`,
       ),
     enabled: !!selectedBatchId,
   });

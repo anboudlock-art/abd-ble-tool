@@ -207,7 +207,7 @@ export default async function productionBatchRoutes(app: FastifyInstance) {
    * end to render the printable label list.
    */
   typed.get(
-    '/production-batches/:id/lock-numbers',
+    '/production/batches/:id/lock-numbers',
     {
       onRequest: [app.authenticate],
       schema: {

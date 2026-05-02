@@ -130,7 +130,19 @@ export function OrgTree({ tree, selected, onSelect }: Props) {
                             : 'text-slate-600 hover:bg-slate-100',
                         )}
                       >
-                        <span className="truncate">{t.name}</span>
+                        <span className="flex flex-col truncate">
+                          <span className="truncate">{t.name}</span>
+                          {t.leaderName ? (
+                            <span
+                              className={clsx(
+                                'truncate text-[10px]',
+                                isSel('team', t.id) ? 'text-white/70' : 'text-slate-400',
+                              )}
+                            >
+                              组长 {t.leaderName}
+                            </span>
+                          ) : null}
+                        </span>
                         <span
                           className={clsx(
                             'flex items-center gap-2 text-xs',

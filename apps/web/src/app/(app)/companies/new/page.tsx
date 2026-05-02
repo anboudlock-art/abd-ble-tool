@@ -13,9 +13,22 @@ import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 
+interface CreatedCompanyResp {
+  id: string;
+  name: string;
+  shortCode: string | null;
+  adminAccount: {
+    id: string;
+    name: string;
+    phone: string;
+    initialPassword: string;
+  } | null;
+}
+
 export default function NewCompanyPage() {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
+  const [created, setCreated] = useState<CreatedCompanyResp | null>(null);
 
   const {
     register,
@@ -28,10 +41,48 @@ export default function NewCompanyPage() {
 
   const m = useMutation({
     mutationFn: (input: CreateCompanyInput) =>
-      apiRequest<{ id: string }>('/api/v1/companies', { method: 'POST', body: input }),
-    onSuccess: (c) => router.push(`/companies/${c.id}`),
+      apiRequest<CreatedCompanyResp>('/api/v1/companies', { method: 'POST', body: input }),
+    onSuccess: (c) => {
+      // If we created an admin too, show the credentials before navigating
+      // away — the password is shown ONCE and never again.
+      if (c.adminAccount) setCreated(c);
+      else router.push(`/companies/${c.id}`);
+    },
     onError: (err) => setServerError(err instanceof ApiClientError ? err.body.message : '创建失败'),
   });
+
+  if (created?.adminAccount) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-semibold text-slate-900">公司已创建</h1>
+        <Card className="max-w-xl border-amber-300">
+          <CardHeader
+            title="管理员账户(请复制，密码只显示一次)"
+            description="把以下信息发给客户。客户首次登录会被强制改密。"
+          />
+          <CardBody className="space-y-3">
+            <Field label="公司"><div>{created.name}</div></Field>
+            <Field label="管理员姓名"><div>{created.adminAccount.name}</div></Field>
+            <Field label="登录手机号">
+              <code className="rounded bg-slate-100 px-2 py-1 font-mono text-sm">
+                {created.adminAccount.phone}
+              </code>
+            </Field>
+            <Field label="临时密码">
+              <code className="rounded bg-amber-100 px-2 py-1 font-mono text-sm text-amber-800">
+                {created.adminAccount.initialPassword}
+              </code>
+            </Field>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button onClick={() => router.push(`/companies/${created.id}`)}>
+                进入公司详情
+              </Button>
+            </div>
+          </CardBody>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -73,6 +124,35 @@ export default function NewCompanyPage() {
             <Field label="联系电话" error={errors.contactPhone?.message}>
               <Input invalid={!!errors.contactPhone} {...register('contactPhone')} />
             </Field>
+
+            <div className="rounded border border-amber-200 bg-amber-50 p-3">
+              <p className="mb-3 text-xs font-medium text-amber-800">
+                顺便创建公司管理员账号(可选,留空则不创建,客户后续无法登录)
+              </p>
+              <div className="space-y-3">
+                <Field label="管理员手机号" error={errors.adminPhone?.message}>
+                  <Input
+                    invalid={!!errors.adminPhone}
+                    placeholder="13800000000"
+                    {...register('adminPhone')}
+                  />
+                </Field>
+                <Field label="管理员姓名" error={errors.adminName?.message}>
+                  <Input invalid={!!errors.adminName} {...register('adminName')} />
+                </Field>
+                <Field
+                  label="管理员密码"
+                  hint="留空则系统自动生成临时密码,管理员首次登录强制修改"
+                  error={errors.adminPassword?.message}
+                >
+                  <Input
+                    type="text"
+                    invalid={!!errors.adminPassword}
+                    {...register('adminPassword')}
+                  />
+                </Field>
+              </div>
+            </div>
 
             {serverError ? (
               <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">

@@ -24,6 +24,16 @@ export const CreateCompanySchema = z.object({
   industry: z.enum(['logistics', 'security', 'other']).default('other'),
   contactName: z.string().max(64).optional(),
   contactPhone: z.string().regex(phoneRegex).optional(),
+  /**
+   * v2.7: when present, the create-company call also provisions a
+   * company_admin user with these credentials so the customer can log in
+   * straight away. Phone is required; password is optional (a temp one is
+   * generated). The new admin always lands in mustChangePassword=true so
+   * the temp password is single-use.
+   */
+  adminPhone: z.string().regex(phoneRegex).optional(),
+  adminName: z.string().min(1).max(64).optional(),
+  adminPassword: z.string().min(6).max(64).optional(),
 });
 export type CreateCompanyInput = z.infer<typeof CreateCompanySchema>;
 

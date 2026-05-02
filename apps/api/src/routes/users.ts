@@ -28,9 +28,17 @@ export default async function userRoutes(app: FastifyInstance) {
       const u = await prisma.user.findUnique({
         where: { id: ctx.userId },
         include: {
-          company: { select: { id: true, name: true } },
+          company: { select: { id: true, name: true, shortCode: true } },
           memberships: {
-            include: { team: { select: { id: true, name: true } } },
+            include: {
+              team: {
+                select: {
+                  id: true,
+                  name: true,
+                  department: { select: { id: true, name: true } },
+                },
+              },
+            },
           },
         },
       });
@@ -45,10 +53,13 @@ export default async function userRoutes(app: FastifyInstance) {
         mustChangePassword: u.mustChangePassword,
         companyId: u.companyId?.toString() ?? null,
         companyName: u.company?.name ?? null,
+        companyShortCode: u.company?.shortCode ?? null,
         teams: u.memberships.map((m) => ({
           id: m.teamId.toString(),
           name: m.team.name,
           roleInTeam: m.roleInTeam,
+          departmentId: m.team.department?.id.toString() ?? null,
+          departmentName: m.team.department?.name ?? null,
         })),
       };
     },
@@ -311,12 +322,21 @@ export default async function userRoutes(app: FastifyInstance) {
           },
         });
         if (teamId) {
-          await tx.userMembership.create({
-            data: {
+          // Upsert so a retried POST /users (or a stale FE retry) doesn't
+          // 500 on the unique (userId, teamId) constraint.
+          await tx.userMembership.upsert({
+            where: {
+              userId_teamId: {
+                userId: u.id,
+                teamId: BigInt(teamId),
+              },
+            },
+            create: {
               userId: u.id,
               teamId: BigInt(teamId),
               roleInTeam: role === 'team_leader' ? 'leader' : 'member',
             },
+            update: {},
           });
         }
         return u;

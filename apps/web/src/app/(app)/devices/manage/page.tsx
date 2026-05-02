@@ -85,7 +85,7 @@ export default function DeviceManagePage() {
   const batchesQ = useQuery({
     queryKey: ['production-batches', { all: true }],
     queryFn: () =>
-      apiRequest<BatchListResp>('/api/v1/production-batches', {
+      apiRequest<BatchListResp>('/api/v1/production/batches', {
         query: { pageSize: 200 },
       }),
   });
@@ -180,17 +180,24 @@ export default function DeviceManagePage() {
     breadcrumbs.push({ label: selected.name });
   }
 
+  // For vendor: show an empty state when no companies exist, instead of a
+  // useless tree shell (and avoid the 409 from /device-tree the user reported).
+  const noCompanies =
+    isVendor && companiesQ.isFetched && (companiesQ.data?.items.length ?? 0) === 0;
+
   return (
     <div className="space-y-4">
       <div className="flex items-end justify-between">
         <h1 className="text-2xl font-semibold text-slate-900">设备管理</h1>
-        {isVendor ? (
+        {isVendor && (companiesQ.data?.items.length ?? 0) > 0 ? (
           <select
             value={companyId}
             onChange={(e) => setCompanyId(e.target.value)}
             className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
           >
-            <option value="">— 选择客户公司 —</option>
+            {/* No empty option: with at least one company, vendor must have
+                one selected so the tree query never fires without a
+                companyId (which the backend rejects with 409). */}
             {companiesQ.data?.items.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
@@ -200,6 +207,19 @@ export default function DeviceManagePage() {
         ) : null}
       </div>
 
+      {noCompanies ? (
+        <Card>
+          <div className="px-6 py-12 text-center text-sm text-slate-500">
+            还没有客户公司。请先去
+            <a href="/companies/new" className="ml-1 text-sky-600 hover:underline">
+              创建一个
+            </a>
+            。
+          </div>
+        </Card>
+      ) : null}
+
+      {!noCompanies ? (
       <div className="grid grid-cols-12 gap-4">
         {/* Left: org tree */}
         <Card className="col-span-12 p-3 md:col-span-3">
@@ -423,6 +443,7 @@ export default function DeviceManagePage() {
           ) : null}
         </Card>
       </div>
+      ) : null}
 
       {showAuthorize ? (
         <AuthorizeDialog
