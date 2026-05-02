@@ -153,6 +153,12 @@ export const DeviceListQuerySchema = PaginationSchema.extend({
   modelId: z.coerce.number().int().positive().optional(),
   ownerCompanyId: z.coerce.number().int().positive().optional(),
   currentTeamId: z.coerce.number().int().positive().optional(),
+  /// Filter by the device's current team's department. Joins device →
+  /// team → department.id. Used by the OrgTree drill-down on
+  /// /devices/manage.
+  currentDepartmentId: z.coerce.number().int().positive().optional(),
+  /// Filter by which production batch the device came off.
+  batchId: z.coerce.number().int().positive().optional(),
   search: z.string().max(64).optional(),
 });
 export type DeviceListQuery = z.infer<typeof DeviceListQuerySchema>;

@@ -24,7 +24,17 @@ export default async function deviceRoutes(app: FastifyInstance) {
     },
     async (req) => {
       const ctx = getAuthContext(req);
-      const { page, pageSize, status, modelId, ownerCompanyId, currentTeamId, search } = req.query;
+      const {
+        page,
+        pageSize,
+        status,
+        modelId,
+        ownerCompanyId,
+        currentTeamId,
+        currentDepartmentId,
+        batchId,
+        search,
+      } = req.query;
 
       const scope = scopeToCompany(ctx);
       const where: Prisma.DeviceWhereInput = {
@@ -32,6 +42,10 @@ export default async function deviceRoutes(app: FastifyInstance) {
         ...(status ? { status } : {}),
         ...(modelId ? { modelId: BigInt(modelId) } : {}),
         ...(currentTeamId ? { currentTeamId: BigInt(currentTeamId) } : {}),
+        ...(currentDepartmentId
+          ? { currentTeam: { departmentId: BigInt(currentDepartmentId) } }
+          : {}),
+        ...(batchId ? { batchId: BigInt(batchId) } : {}),
         ...(ownerCompanyId ? { ownerCompanyId: BigInt(ownerCompanyId) } : {}),
         ...(scope.companyId ? { ownerCompanyId: scope.companyId } : {}),
         ...(search
@@ -141,7 +155,15 @@ export default async function deviceRoutes(app: FastifyInstance) {
     },
     async (req, reply) => {
       const ctx = getAuthContext(req);
-      const { status, modelId, ownerCompanyId, currentTeamId, search } = req.query;
+      const {
+        status,
+        modelId,
+        ownerCompanyId,
+        currentTeamId,
+        currentDepartmentId,
+        batchId,
+        search,
+      } = req.query;
       const scope = scopeToCompany(ctx);
 
       const where: Prisma.DeviceWhereInput = {
@@ -149,6 +171,10 @@ export default async function deviceRoutes(app: FastifyInstance) {
         ...(status ? { status } : {}),
         ...(modelId ? { modelId: BigInt(modelId) } : {}),
         ...(currentTeamId ? { currentTeamId: BigInt(currentTeamId) } : {}),
+        ...(currentDepartmentId
+          ? { currentTeam: { departmentId: BigInt(currentDepartmentId) } }
+          : {}),
+        ...(batchId ? { batchId: BigInt(batchId) } : {}),
         ...(ownerCompanyId ? { ownerCompanyId: BigInt(ownerCompanyId) } : {}),
         ...(scope.companyId ? { ownerCompanyId: scope.companyId } : {}),
         ...(search
