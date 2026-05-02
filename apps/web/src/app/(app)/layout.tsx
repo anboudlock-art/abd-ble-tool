@@ -21,6 +21,7 @@ const ROUTE_ROLES: Record<string, readonly string[] | null> = {
   '/dashboard': null,
   '/notifications': null,
   '/change-password': null,
+  '/settings': null,
   '/devices': null, // /devices list is open; /devices/manage tightens below
   '/devices/manage': ['vendor_admin', 'company_admin', 'dept_admin', 'team_leader'],
   '/alarms': null,
@@ -95,8 +96,20 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     );
   }
 
-  // While the redirect lands, render a placeholder rather than the
-  // forbidden page itself.
+  // mustChangePassword: BEFORE the useEffect-driven redirect lands the
+  // page would otherwise render for one frame. Hard-block the children
+  // so the QA test (and a real human navigating fast) can't get a peek
+  // at any other page until the password is changed.
+  if (user.mustChangePassword && pathname !== '/change-password') {
+    return (
+      <main className="flex min-h-screen items-center justify-center text-sm text-slate-400">
+        首次登录请修改密码，正在跳转…
+      </main>
+    );
+  }
+
+  // While the route-guard redirect lands, render a placeholder rather
+  // than the forbidden page itself.
   if (!allowed) {
     return (
       <main className="flex min-h-screen items-center justify-center text-sm text-slate-400">

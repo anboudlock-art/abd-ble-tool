@@ -3,7 +3,7 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { prisma } from '@abd/db';
 import { ApiError } from '@abd/shared';
-import { getAuthContext, scopeToCompany } from '../lib/auth.js';
+import { getAuthContext, requireRole, scopeToCompany } from '../lib/auth.js';
 
 /**
  * Device-tree endpoint backing the /devices/manage page (v2.7 task 4).
@@ -24,7 +24,13 @@ export default async function deviceManagementRoutes(app: FastifyInstance) {
   typed.get(
     '/device-tree',
     {
-      onRequest: [app.authenticate],
+      // The org tree (deviceCount per team, member rosters via leader name)
+      // is a management view — never open to plain members. Same role
+      // matrix as /authorizations.
+      onRequest: [
+        app.authenticate,
+        requireRole('vendor_admin', 'company_admin', 'dept_admin', 'team_leader'),
+      ],
       schema: {
         querystring: z.object({
           companyId: z.coerce.number().int().positive().optional(),

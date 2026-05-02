@@ -22,6 +22,7 @@ import {
   LogOut,
   Plug,
   Radio,
+  Settings,
   ShieldCheck,
   UsersRound,
   Wrench,
@@ -320,6 +321,12 @@ export function Sidebar() {
           {user?.name ?? ''}
           <span className="ml-1 text-slate-400">({user?.role})</span>
         </div>
+        <Link
+          href="/settings"
+          className="mb-1 flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-slate-500 hover:bg-slate-100"
+        >
+          <Settings size={14} /> 设置
+        </Link>
         <Link
           href="/change-password"
           className="mb-1 flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-slate-500 hover:bg-slate-100"
