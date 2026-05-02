@@ -226,7 +226,9 @@ export default function DashboardPage() {
                   <div>
                     <div className="font-mono text-sm">{d.lockId}</div>
                     <div className="text-xs text-slate-500">
-                      {new Date(d.lastSeenAt).toLocaleString('zh-CN')}
+                      {d.lastSeenAt
+                        ? new Date(d.lastSeenAt).toLocaleString('zh-CN')
+                        : '尚未上报'}
                     </div>
                   </div>
                   <div className="text-right">

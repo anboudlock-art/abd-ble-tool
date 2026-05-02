@@ -3,10 +3,11 @@
 import { use, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, MapPin, Pencil, Trash2, Wrench } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowLeft, MapPin, Pencil, ShieldOff, Trash2, Wrench } from 'lucide-react';
 import {
   apiRequest,
+  ApiClientError,
   type Device,
   type DeviceTransfer,
 } from '@/lib/api';
@@ -64,6 +65,18 @@ export default function DeviceDetailPage({
   const assignmentQ = useQuery({
     queryKey: ['device', id, 'assignment'],
     queryFn: () => apiRequest<AssignmentResp>(`/api/v1/devices/${id}/assignment`),
+  });
+
+  const qc = useQueryClient();
+  const revoke = useMutation({
+    mutationFn: (assignmentId: string) =>
+      apiRequest(`/api/v1/authorizations/${assignmentId}/revoke`, { method: 'POST' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['device', id, 'assignment'] });
+      qc.invalidateQueries({ queryKey: ['authorizations'] });
+    },
+    onError: (e) =>
+      alert(e instanceof ApiClientError ? e.body.message : '撤销失败'),
   });
 
   if (deviceQ.isLoading) {
@@ -230,7 +243,26 @@ export default function DeviceDetailPage({
 
       {assignmentQ.data?.current ? (
         <Card>
-          <CardHeader title="当前授权" />
+          <CardHeader
+            title="当前授权"
+            action={
+              canEdit ? (
+                <Button
+                  variant="ghost"
+                  loading={revoke.isPending}
+                  onClick={() => {
+                    const a = assignmentQ.data?.current;
+                    if (!a) return;
+                    if (confirm(`撤销当前授权？(${a.userName ?? a.teamName ?? a.scope})`)) {
+                      revoke.mutate(a.id);
+                    }
+                  }}
+                >
+                  <ShieldOff size={14} /> 撤销授权
+                </Button>
+              ) : null
+            }
+          />
           <CardBody>
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
               <div>

@@ -1,8 +1,29 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { AlertTriangle, Boxes, Building2, ClipboardList, Clock3, Cpu, Factory, Hash, KeyRound, LayoutDashboard, ListChecks, Lock, LogOut, Plug, Radio, ShieldCheck, UsersRound, Wrench } from 'lucide-react';
+import {
+  AlertTriangle,
+  Boxes,
+  Building2,
+  ChevronDown,
+  ClipboardList,
+  Clock3,
+  Cpu,
+  Factory,
+  Hash,
+  KeyRound,
+  LayoutDashboard,
+  ListChecks,
+  Lock,
+  LogOut,
+  Plug,
+  Radio,
+  ShieldCheck,
+  UsersRound,
+  Wrench,
+} from 'lucide-react';
 import { clsx } from 'clsx';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -13,88 +34,165 @@ interface NavItem {
   roles?: string[];
 }
 
-const items: NavItem[] = [
-  { href: '/dashboard', label: '概览', icon: LayoutDashboard },
+interface NavGroup {
+  /** null = ungrouped, rendered as a single item (e.g. 概览) */
+  groupId: string | null;
+  groupLabel?: string;
+  groupRoles?: string[];
+  collapsible?: boolean;
+  defaultOpen?: boolean;
+  items: NavItem[];
+}
+
+/**
+ * Sidebar v2.7 (task 1) — 4 functional groups + 概览 root.
+ * Roles per item come from CLAUDE_TASKS_V27.md §1; group-level `roles`
+ * is the union (so a group hides if every item is hidden).
+ */
+const groups: NavGroup[] = [
   {
-    href: '/warehouses',
-    label: '三库总览',
-    icon: Factory,
-    roles: ['vendor_admin'],
-  },
-  { href: '/devices', label: '设备', icon: Lock },
-  {
-    href: '/authorizations',
-    label: '授权管理',
-    icon: ListChecks,
-    roles: ['vendor_admin', 'company_admin', 'dept_admin'],
-  },
-  { href: '/alarms', label: '告警', icon: AlertTriangle },
-  {
-    href: '/permission-approvals',
-    label: '权限审批',
-    icon: ShieldCheck,
-    roles: ['vendor_admin', 'company_admin', 'dept_admin'],
+    groupId: null,
+    items: [{ href: '/dashboard', label: '概览', icon: LayoutDashboard }],
   },
   {
-    href: '/temporary-approvals',
-    label: '临开审批',
-    icon: Clock3,
-    roles: ['vendor_admin', 'company_admin', 'dept_admin', 'team_leader'],
+    groupId: 'vendor',
+    groupLabel: '🏭 厂商功能',
+    groupRoles: ['vendor_admin', 'production_operator'],
+    items: [
+      {
+        href: '/warehouses',
+        label: '三库总览',
+        icon: Factory,
+        roles: ['vendor_admin', 'production_operator'],
+      },
+      {
+        href: '/repairs',
+        label: '维修中库',
+        icon: Wrench,
+        roles: ['vendor_admin', 'company_admin', 'production_operator'],
+      },
+    ],
   },
   {
-    href: '/batches',
-    label: '生产批次',
-    icon: Boxes,
-    roles: ['vendor_admin', 'production_operator'],
+    groupId: 'production',
+    groupLabel: '📦 生产环节',
+    groupRoles: ['vendor_admin', 'production_operator'],
+    collapsible: true,
+    defaultOpen: false,
+    items: [
+      {
+        href: '/batches',
+        label: '生产批次',
+        icon: Boxes,
+        roles: ['vendor_admin', 'production_operator'],
+      },
+      { href: '/lock-numbers', label: '锁号生成', icon: Hash, roles: ['vendor_admin'] },
+      {
+        href: '/ble-debug',
+        label: 'BLE 调试',
+        icon: Radio,
+        roles: ['vendor_admin', 'production_operator'],
+      },
+    ],
   },
   {
-    href: '/lock-numbers',
-    label: '锁号生成器',
-    icon: Hash,
-    roles: ['vendor_admin'],
+    groupId: 'ops',
+    groupLabel: '🔧 运维功能',
+    items: [
+      {
+        href: '/devices',
+        label: '设备',
+        icon: Lock,
+        roles: ['vendor_admin', 'company_admin', 'dept_admin', 'team_leader', 'member'],
+      },
+      {
+        href: '/devices/manage',
+        label: '设备管理',
+        icon: UsersRound,
+        roles: ['vendor_admin', 'company_admin', 'dept_admin', 'team_leader'],
+      },
+      {
+        href: '/authorizations',
+        label: '授权管理',
+        icon: ListChecks,
+        roles: ['vendor_admin', 'company_admin', 'dept_admin'],
+      },
+      {
+        href: '/permission-approvals',
+        label: '权限审批',
+        icon: ShieldCheck,
+        roles: ['vendor_admin', 'company_admin', 'dept_admin'],
+      },
+      {
+        href: '/temporary-approvals',
+        label: '临开审批',
+        icon: Clock3,
+        roles: ['vendor_admin', 'company_admin', 'dept_admin', 'team_leader'],
+      },
+      {
+        href: '/alarms',
+        label: '告警',
+        icon: AlertTriangle,
+        roles: ['vendor_admin', 'company_admin', 'dept_admin', 'team_leader', 'member'],
+      },
+    ],
   },
   {
-    href: '/repairs',
-    label: '维修中库',
-    icon: Wrench,
-    roles: ['vendor_admin', 'company_admin', 'production_operator'],
-  },
-  { href: '/companies', label: '客户公司', icon: Building2, roles: ['vendor_admin'] },
-  {
-    href: '/users',
-    label: '人员',
-    icon: UsersRound,
-    roles: ['vendor_admin', 'company_admin', 'dept_admin', 'team_leader'],
-  },
-  {
-    href: '/integrations',
-    label: '对接 API',
-    icon: Plug,
-    roles: ['vendor_admin', 'company_admin'],
-  },
-  {
-    href: '/firmware',
-    label: '固件 OTA',
-    icon: Cpu,
-    roles: ['vendor_admin', 'company_admin'],
-  },
-  {
-    href: '/ble-debug',
-    label: 'BLE 调试',
-    icon: Radio,
-    roles: ['vendor_admin', 'production_operator'],
-  },
-  {
-    href: '/audit-logs',
-    label: '操作日志',
-    icon: ClipboardList,
-    roles: ['vendor_admin', 'company_admin'],
+    groupId: 'admin',
+    groupLabel: '⚙️ 管理设置',
+    groupRoles: ['vendor_admin', 'company_admin', 'dept_admin', 'team_leader'],
+    collapsible: true,
+    defaultOpen: false,
+    items: [
+      {
+        href: '/companies',
+        label: '客户公司',
+        icon: Building2,
+        roles: ['vendor_admin'],
+      },
+      {
+        href: '/users',
+        label: '人员',
+        icon: UsersRound,
+        roles: ['vendor_admin', 'company_admin', 'dept_admin', 'team_leader'],
+      },
+      {
+        href: '/integrations',
+        label: '对接 API',
+        icon: Plug,
+        roles: ['vendor_admin', 'company_admin'],
+      },
+      {
+        href: '/firmware',
+        label: '固件 OTA',
+        icon: Cpu,
+        roles: ['vendor_admin', 'company_admin'],
+      },
+      {
+        href: '/audit-logs',
+        label: '操作日志',
+        icon: ClipboardList,
+        roles: ['vendor_admin', 'company_admin'],
+      },
+    ],
   },
 ];
+
+function visibleItems(items: NavItem[], role: string | undefined): NavItem[] {
+  if (!role) return [];
+  return items.filter((it) => !it.roles || it.roles.includes(role));
+}
 
 export function Sidebar() {
   const pathname = usePathname() ?? '';
   const { user, logout } = useAuth();
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(
+      groups
+        .filter((g) => g.collapsible)
+        .map((g) => [g.groupId!, g.defaultOpen ?? false]),
+    ),
+  );
 
   return (
     <aside className="flex h-screen w-56 shrink-0 flex-col border-r border-slate-200 bg-white">
@@ -103,26 +201,50 @@ export function Sidebar() {
         <div className="text-xs text-slate-500">智能锁管理平台</div>
       </div>
 
-      <nav className="flex-1 space-y-1 px-3">
-        {items
-          .filter((it) => !it.roles || (user?.role && it.roles.includes(user.role)))
-          .map((it) => {
-          const active = pathname.startsWith(it.href);
-          const Icon = it.icon;
+      <nav className="flex-1 overflow-y-auto px-3 pb-2">
+        {groups.map((g) => {
+          const items = visibleItems(g.items, user?.role);
+          if (items.length === 0) return null;
+
+          // Ungrouped (e.g. 概览)
+          if (g.groupId == null) {
+            return (
+              <div key="root" className="space-y-1">
+                {items.map((it) => renderItem(it, pathname))}
+              </div>
+            );
+          }
+
+          const open = g.collapsible ? !!openGroups[g.groupId] : true;
           return (
-            <Link
-              key={it.href}
-              href={it.href}
-              className={clsx(
-                'flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors',
-                active
-                  ? 'bg-slate-900 text-white'
-                  : 'text-slate-600 hover:bg-slate-100',
+            <div key={g.groupId} className="mt-3">
+              {g.collapsible ? (
+                <button
+                  onClick={() =>
+                    setOpenGroups((s) => ({ ...s, [g.groupId!]: !open }))
+                  }
+                  className="flex w-full items-center justify-between rounded px-2 py-1 text-xs font-medium uppercase tracking-wider text-slate-500 hover:bg-slate-50"
+                >
+                  <span>{g.groupLabel}</span>
+                  <ChevronDown
+                    size={12}
+                    className={clsx(
+                      'transition-transform',
+                      open ? 'rotate-0' : '-rotate-90',
+                    )}
+                  />
+                </button>
+              ) : (
+                <div className="px-2 py-1 text-xs font-medium uppercase tracking-wider text-slate-500">
+                  {g.groupLabel}
+                </div>
               )}
-            >
-              <Icon size={16} />
-              <span>{it.label}</span>
-            </Link>
+              {open ? (
+                <div className="mt-1 space-y-0.5">
+                  {items.map((it) => renderItem(it, pathname))}
+                </div>
+              ) : null}
+            </div>
           );
         })}
       </nav>
@@ -146,5 +268,25 @@ export function Sidebar() {
         </button>
       </div>
     </aside>
+  );
+}
+
+function renderItem(it: NavItem, pathname: string) {
+  const Icon = it.icon;
+  // Use exact match for /devices vs /devices/manage to avoid both
+  // highlighting at once.
+  const active = pathname === it.href || pathname.startsWith(it.href + '/');
+  return (
+    <Link
+      key={it.href}
+      href={it.href}
+      className={clsx(
+        'flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors',
+        active ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100',
+      )}
+    >
+      <Icon size={16} />
+      <span>{it.label}</span>
+    </Link>
   );
 }

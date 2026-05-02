@@ -116,15 +116,19 @@ export default function AuditLogsPage() {
                     {new Date(a.createdAt).toLocaleString('zh-CN')}
                   </Td>
                   <Td>
-                    {a.actor ? (
+                    {a.actor?.name ? (
                       <span>
-                        {a.actor.name}
-                        <span className="ml-1 font-mono text-xs text-slate-400">
-                          {a.actor.phone}
-                        </span>
+                        <span className="font-medium">{a.actor.name}</span>
+                        {a.actor.phone ? (
+                          <span className="ml-1 font-mono text-xs text-slate-400">
+                            {a.actor.phone}
+                          </span>
+                        ) : null}
                       </span>
                     ) : (
-                      <span className="text-slate-400">—</span>
+                      <span className="text-xs text-slate-400">
+                        匿名/系统
+                      </span>
                     )}
                   </Td>
                   <Td>

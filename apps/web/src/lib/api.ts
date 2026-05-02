@@ -547,9 +547,10 @@ export interface DashboardSummary {
   recentDevices: Array<{
     id: string;
     lockId: string;
+    status: string;
     lastState: string;
     lastBattery: number | null;
-    lastSeenAt: string;
+    lastSeenAt: string | null;
   }>;
 }
 
@@ -738,3 +739,31 @@ export interface AuthorizationListResp {
   page: number;
   pageSize: number;
 }
+
+// ----- v2.7 device-tree -----
+
+export interface OrgTeam {
+  id: string;
+  name: string;
+  deviceCount: number;
+  memberCount: number;
+}
+export interface OrgDepartment {
+  id: string;
+  name: string;
+  code: string | null;
+  deviceCount: number;
+  teams: OrgTeam[];
+}
+export interface OrgTree {
+  id: string;          // company id
+  name: string;
+  deviceCount: number;
+  unassignedCount: number;
+  departments: OrgDepartment[];
+}
+
+export type OrgNodeSelection =
+  | { type: 'company'; id: string; name: string }
+  | { type: 'department'; id: string; name: string; companyId: string }
+  | { type: 'team'; id: string; name: string; departmentId: string; companyId: string };

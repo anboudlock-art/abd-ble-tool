@@ -66,17 +66,17 @@ export default async function dashboardRoutes(app: FastifyInstance) {
             receivedAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
           },
         }),
-        // Most-recently-active devices for the "活跃设备" mini list
+        // Recent devices for the "活跃设备" mini list. Prefer lastSeenAt
+        // when set; fall back to updatedAt so freshly-registered devices
+        // (e.g. seeds/virtual locks that haven't reported yet) still show.
         prisma.device.findMany({
-          where: {
-            ...deviceWhere,
-            lastSeenAt: { not: null },
-          },
-          orderBy: { lastSeenAt: 'desc' },
+          where: deviceWhere,
+          orderBy: [{ lastSeenAt: { sort: 'desc', nulls: 'last' } }, { updatedAt: 'desc' }],
           take: 6,
           select: {
             id: true,
             lockId: true,
+            status: true,
             lastState: true,
             lastBattery: true,
             lastSeenAt: true,
@@ -131,9 +131,10 @@ export default async function dashboardRoutes(app: FastifyInstance) {
         recentDevices: recentDevices.map((d) => ({
           id: d.id.toString(),
           lockId: d.lockId,
+          status: d.status,
           lastState: d.lastState,
           lastBattery: d.lastBattery,
-          lastSeenAt: d.lastSeenAt!.toISOString(),
+          lastSeenAt: d.lastSeenAt?.toISOString() ?? null,
         })),
       };
     },

@@ -36,6 +36,7 @@ import permissionRequestRoutes from './routes/permission-requests.js';
 import temporaryUnlockRoutes from './routes/temporary-unlock.js';
 import lockNumberRoutes from './routes/lock-numbers.js';
 import repairRoutes from './routes/repairs.js';
+import deviceManagementRoutes from './routes/device-management.js';
 import openApiRoutes from './routes/open-api.js';
 import openApiAuthPlugin from './middlewares/open-api-auth.js';
 
@@ -123,6 +124,7 @@ export async function buildApp() {
   await app.register(temporaryUnlockRoutes, { prefix: '/api/v1' });
   await app.register(lockNumberRoutes, { prefix: '/api/v1' });
   await app.register(repairRoutes, { prefix: '/api/v1' });
+  await app.register(deviceManagementRoutes, { prefix: '/api/v1' });
 
   // Public Open API for third-party integrations. Different prefix + HMAC auth.
   await app.register(async (scope) => {

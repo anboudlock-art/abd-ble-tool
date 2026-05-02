@@ -10,6 +10,7 @@ import {
   apiRequest,
   ApiClientError,
   downloadFile,
+  type BatchListResp,
   type Device,
   type DeviceListResp,
   type DeviceModel,
@@ -45,6 +46,7 @@ export default function DevicesPage() {
   const searchParams = useSearchParams();
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
+  const [batchId, setBatchId] = useState('');
 
   // Pre-fill the status filter from URL ?status=manufactured (warehouse drill-down)
   useEffect(() => {
@@ -87,8 +89,16 @@ export default function DevicesPage() {
     queryFn: () => apiRequest<{ items: DeviceModel[] }>('/api/v1/device-models'),
   });
 
+  const batchesQ = useQuery({
+    queryKey: ['production-batches', { all: true }],
+    queryFn: () =>
+      apiRequest<BatchListResp>('/api/v1/production-batches', {
+        query: { pageSize: 200 },
+      }),
+  });
+
   const devicesQ = useQuery({
-    queryKey: ['devices', { search, status, modelId, page }],
+    queryKey: ['devices', { search, status, modelId, batchId, page }],
     queryFn: () =>
       apiRequest<DeviceListResp>('/api/v1/devices', {
         query: {
@@ -97,6 +107,7 @@ export default function DevicesPage() {
           search: search || undefined,
           status: status || undefined,
           modelId: modelId || undefined,
+          batchId: batchId || undefined,
         },
       }),
   });
@@ -173,6 +184,7 @@ export default function DevicesPage() {
                     search: search || undefined,
                     status: status || undefined,
                     modelId: modelId || undefined,
+                    batchId: batchId || undefined,
                   },
                   'devices.csv',
                 );
@@ -245,6 +257,21 @@ export default function DevicesPage() {
             {STATUS_OPTIONS.filter(Boolean).map((s) => (
               <option key={s} value={s}>
                 {deviceStatusLabel[s] ?? s}
+              </option>
+            ))}
+          </select>
+          <select
+            value={batchId}
+            onChange={(e) => {
+              setBatchId(e.target.value);
+              setPage(1);
+            }}
+            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+          >
+            <option value="">全部批次</option>
+            {batchesQ.data?.items.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.batchNo} · {b.quantity} 台
               </option>
             ))}
           </select>
@@ -358,7 +385,23 @@ export default function DevicesPage() {
                       </Badge>
                     </Td>
                     <Td>{d.ownerCompanyName ?? (d.ownerType === 'vendor' ? '厂商' : '—')}</Td>
-                    <Td>{d.lastBattery !== null ? `${d.lastBattery}%` : '—'}</Td>
+                    <Td>
+                      {d.lastBattery !== null ? (
+                        <span
+                          className={
+                            d.lastBattery < 20
+                              ? 'text-xs font-medium text-rose-500'
+                              : d.lastBattery < 50
+                                ? 'text-xs font-medium text-amber-500'
+                                : 'text-xs font-medium text-emerald-600'
+                          }
+                        >
+                          {d.lastBattery}%
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-400">—</span>
+                      )}
+                    </Td>
                     <Td className="text-xs text-slate-500">
                       {d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString('zh-CN') : '—'}
                     </Td>
