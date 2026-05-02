@@ -105,7 +105,21 @@ export default async function userRoutes(app: FastifyInstance) {
               lastBattery: true,
               lastSeenAt: true,
               doorLabel: true,
-              modelId: true,
+              gatewayId: true,
+              gateway: { select: { online: true } },
+              model: {
+                select: {
+                  id: true,
+                  code: true,
+                  name: true,
+                  category: true,
+                  hasBle: true,
+                  has4g: true,
+                  hasGps: true,
+                  hasLora: true,
+                  capabilitiesJson: true,
+                },
+              },
             },
           },
           team: { select: { id: true, name: true } },
@@ -132,6 +146,23 @@ export default async function userRoutes(app: FastifyInstance) {
           lastBattery: a.device.lastBattery,
           lastSeenAt: a.device.lastSeenAt?.toISOString() ?? null,
           doorLabel: a.device.doorLabel,
+          // v2.8 Ask 1+6+7: model capabilities + gateway availability so
+          // the APP can pick BLE / LoRa / 4G buttons per-device.
+          model: a.device.model
+            ? {
+                id: a.device.model.id.toString(),
+                code: a.device.model.code,
+                name: a.device.model.name,
+                category: a.device.model.category,
+                hasBle: a.device.model.hasBle,
+                has4g: a.device.model.has4g,
+                hasGps: a.device.model.hasGps,
+                hasLora: a.device.model.hasLora,
+                capabilitiesJson: a.device.model.capabilitiesJson,
+              }
+            : null,
+          gatewayId: a.device.gatewayId?.toString() ?? null,
+          gatewayOnline: a.device.gateway?.online ?? null,
           assignmentScope: a.scope,
           teamId: a.team?.id.toString() ?? null,
           teamName: a.team?.name ?? null,

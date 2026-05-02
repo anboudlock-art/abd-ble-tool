@@ -253,10 +253,42 @@ export const DeployDeviceSchema = z.object({
 });
 export type DeployDeviceInput = z.infer<typeof DeployDeviceSchema>;
 
+/**
+ * v2.8: caller may pin the transport. 'auto' (default) keeps the
+ * server-side picker (LoRa if reachable, else 4G). 'ble' tells the
+ * server to skip every gateway downlink — APP will forward over BLE
+ * itself and POST /ack when done. 'lora' / 'fourg' force-pick a
+ * transport even when the other is also available.
+ */
+export const DeviceCommandLinkEnum = z.enum(['auto', 'ble', 'lora', 'fourg']);
+export type DeviceCommandLinkValue = z.infer<typeof DeviceCommandLinkEnum>;
+
 export const DeviceCommandRequestSchema = z.object({
   commandType: z.enum(['unlock', 'lock', 'query_status']),
+  link: DeviceCommandLinkEnum.optional().default('auto'),
+  /** Requester's GPS at the moment of asking. Stored on the command row
+   *  for audit; the unlock-actually-happened GPS lives on the ack. */
+  phoneLat: z.number().min(-90).max(90).optional(),
+  phoneLng: z.number().min(-180).max(180).optional(),
+  phoneAccuracyM: z.number().int().nonnegative().max(100_000).optional(),
+  /** Optional client wall-clock for offline replay. Server clamps to
+   *  [now-7d, now+60s] — outside that window the request is rejected
+   *  (future) or the value is rewritten to now() (>7d ago). */
+  occurredAt: z.string().datetime().optional(),
 });
 export type DeviceCommandRequestInput = z.infer<typeof DeviceCommandRequestSchema>;
+
+/** v2.8 BLE precheck: APP completes the unlock then PUT/POSTs the
+ *  result back. errorMessage required when ok=false. */
+export const AckDeviceCommandSchema = z.object({
+  ok: z.boolean(),
+  errorMessage: z.string().max(255).optional(),
+  occurredAt: z.string().datetime(),
+  phoneLat: z.number().min(-90).max(90).optional(),
+  phoneLng: z.number().min(-180).max(180).optional(),
+  phoneAccuracyM: z.number().int().nonnegative().max(100_000).optional(),
+});
+export type AckDeviceCommandInput = z.infer<typeof AckDeviceCommandSchema>;
 
 // -------------------- Phase 5: integration / webhooks --------------------
 

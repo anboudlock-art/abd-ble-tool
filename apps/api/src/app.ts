@@ -2,6 +2,10 @@ import './lib/bigint.js'; // must come first: installs BigInt→string serialize
 import Fastify from 'fastify';
 import fastifyCors from '@fastify/cors';
 import fastifyHelmet from '@fastify/helmet';
+import fastifyMultipart from '@fastify/multipart';
+import fastifyStatic from '@fastify/static';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import fastifyRateLimit from '@fastify/rate-limit';
 import fastifySensible from '@fastify/sensible';
 import fastifySwagger from '@fastify/swagger';
@@ -37,6 +41,7 @@ import temporaryUnlockRoutes from './routes/temporary-unlock.js';
 import lockNumberRoutes from './routes/lock-numbers.js';
 import repairRoutes from './routes/repairs.js';
 import deviceManagementRoutes from './routes/device-management.js';
+import uploadRoutes from './routes/uploads.js';
 import openApiRoutes from './routes/open-api.js';
 import openApiAuthPlugin from './middlewares/open-api-auth.js';
 
@@ -65,6 +70,23 @@ export async function buildApp() {
   // Helmet is fine for normal API traffic but its strict CSP breaks
   // Swagger UI's inline-script bootstrap. Allow inline 'self' for /docs.
   await app.register(fastifyHelmet, { contentSecurityPolicy: false });
+  // v2.8 Ask 4: deployment / op photos. Limit set to 6 MB to leave room
+  // for the 5 MB hard cap inside the route handler + multipart overhead.
+  await app.register(fastifyMultipart, {
+    limits: { fileSize: 6 * 1024 * 1024, files: 1 },
+  });
+  // Serve uploaded files statically. Until Nginx + a domain are wired
+  // up the API process is the only thing serving these.
+  const uploadDir = process.env.UPLOAD_DIR ?? '/var/abd/uploads';
+  await mkdir(uploadDir, { recursive: true }).catch(() => {});
+  await app.register(fastifyStatic, {
+    root: uploadDir,
+    prefix: '/uploads/',
+    decorateReply: false,
+  });
+  // The static prefix and `join(uploadDir, ...)` together must agree;
+  // double-check on every boot to surface mis-configuration.
+  void join(uploadDir, 'sentinel');
 
   // OpenAPI: build a spec from every zod-validated route, render it at /docs.
   if (config.NODE_ENV !== 'test') {
@@ -125,6 +147,7 @@ export async function buildApp() {
   await app.register(lockNumberRoutes, { prefix: '/api/v1' });
   await app.register(repairRoutes, { prefix: '/api/v1' });
   await app.register(deviceManagementRoutes, { prefix: '/api/v1' });
+  await app.register(uploadRoutes, { prefix: '/api/v1' });
 
   // Public Open API for third-party integrations. Different prefix + HMAC auth.
   await app.register(async (scope) => {

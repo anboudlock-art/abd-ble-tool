@@ -528,12 +528,23 @@ enum DeviceCommandStatus {
   failed
 }
 
+enum DeviceCommandLink {
+  auto
+  ble
+  lora
+  fourg
+}
+
 model DeviceCommand {
   id              BigInt                @id @default(autoincrement())
   deviceId        BigInt                @map("device_id")
   commandType     DeviceCommandType     @map("command_type")
   issuedByUserId  BigInt?               @map("issued_by_user_id")
   source          DeviceCommandSource
+  /// v2.8: which transport carried this command. 'auto' is the legacy
+  /// behaviour (server picks 4G or LoRa based on device capability);
+  /// 'ble' means the APP forwarded over BLE itself.
+  link            DeviceCommandLink     @default(auto)
   gatewayId       BigInt?               @map("gateway_id")
   requestPayload  Bytes?                @map("request_payload")
   status          DeviceCommandStatus   @default(pending)
@@ -543,6 +554,22 @@ model DeviceCommand {
   timeoutAt       DateTime?             @map("timeout_at")
   resultEventId   BigInt?               @map("result_event_id")
   errorMessage    String?               @map("error_message") @db.VarChar(255)
+  /// v2.8: phone GPS at command-creation time ("user is here").
+  phoneLat        Decimal?              @map("phone_lat") @db.Decimal(10, 7)
+  phoneLng        Decimal?              @map("phone_lng") @db.Decimal(10, 7)
+  phoneAccuracyM  Int?                  @map("phone_accuracy_m")
+  /// v2.8: phone GPS at ack time ("where the unlock actually happened").
+  ackPhoneLat     Decimal?              @map("ack_phone_lat") @db.Decimal(10, 7)
+  ackPhoneLng     Decimal?              @map("ack_phone_lng") @db.Decimal(10, 7)
+  ackPhoneAccuracyM Int?                @map("ack_phone_accuracy_m")
+  /// v2.8: client-supplied wall-clock for the actual operation; may be
+  /// in the past (offline replay). Subject to clamp rules — see
+  /// serverNote when it was rewritten by the server.
+  occurredAt      DateTime?             @map("occurred_at")
+  /// v2.8: free-form audit annotation written by the server when it
+  /// adjusts client-supplied data (e.g. clamping out-of-window
+  /// occurredAt). Empty for normal happy-path commands.
+  serverNote      String?               @map("server_note") @db.VarChar(255)
   createdAt       DateTime              @default(now()) @map("created_at")
 
   device          Device                @relation(fields: [deviceId], references: [id])

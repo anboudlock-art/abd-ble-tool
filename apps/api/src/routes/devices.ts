@@ -63,7 +63,12 @@ export default async function deviceRoutes(app: FastifyInstance) {
       const [items, total] = await Promise.all([
         prisma.device.findMany({
           where,
-          include: { model: true, ownerCompany: true, currentTeam: true },
+          include: {
+            model: true,
+            ownerCompany: true,
+            currentTeam: true,
+            gateway: { select: { online: true } },
+          },
           orderBy: { id: 'desc' },
           skip: (page - 1) * pageSize,
           take: pageSize,
@@ -90,7 +95,13 @@ export default async function deviceRoutes(app: FastifyInstance) {
       const ctx = getAuthContext(req);
       const device = await prisma.device.findUnique({
         where: { id: BigInt(req.params.id) },
-        include: { model: true, ownerCompany: true, currentTeam: true, batch: true },
+        include: {
+          model: true,
+          ownerCompany: true,
+          currentTeam: true,
+          batch: true,
+          gateway: { select: { online: true } },
+        },
       });
       if (!device || device.deletedAt) throw ApiError.notFound();
       const scope = scopeToCompany(ctx);
@@ -936,10 +947,22 @@ function csvEscape(v: string): string {
 
 type Device = Prisma.DeviceGetPayload<Record<string, never>>;
 type DeviceWithRelations = Device & {
-  model?: { id: bigint; code: string; name: string } | null;
+  model?: {
+    id: bigint;
+    code: string;
+    name: string;
+    /** v2.8 Ask 7: capabilities for the APP to render per-device buttons. */
+    category?: string | null;
+    hasBle?: boolean;
+    has4g?: boolean;
+    hasGps?: boolean;
+    hasLora?: boolean;
+    capabilitiesJson?: unknown;
+  } | null;
   ownerCompany?: { name: string } | null;
   currentTeam?: unknown | null;
   batch?: { batchNo: string } | null;
+  gateway?: { online: boolean } | null;
 };
 // (Prisma model already includes the new fields via DeviceGetPayload<>)
 
@@ -951,8 +974,20 @@ function serialize(d: DeviceWithRelations) {
     bleMac: d.bleMac,
     imei: d.imei,
     model: d.model
-      ? { id: d.model.id.toString(), code: d.model.code, name: d.model.name }
+      ? {
+          id: d.model.id.toString(),
+          code: d.model.code,
+          name: d.model.name,
+          category: d.model.category ?? null,
+          hasBle: d.model.hasBle ?? null,
+          has4g: d.model.has4g ?? null,
+          hasGps: d.model.hasGps ?? null,
+          hasLora: d.model.hasLora ?? null,
+          capabilitiesJson: d.model.capabilitiesJson ?? null,
+        }
       : null,
+    gatewayId: d.gatewayId?.toString() ?? null,
+    gatewayOnline: d.gateway?.online ?? null,
     firmwareVersion: d.firmwareVersion,
     hardwareVersion: d.hardwareVersion,
     qcStatus: d.qcStatus,
