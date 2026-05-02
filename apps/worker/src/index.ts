@@ -29,6 +29,7 @@ export const QUEUE_NOTIFICATIONS = 'notifications';
 export const QUEUE_OFFLINE_CHECK = 'offline-check';
 export const QUEUE_SMS = 'sms';
 export const QUEUE_TEMP_UNLOCK_SWEEP = 'temp-unlock-sweep';
+export const QUEUE_COMMAND_TIMEOUT_SWEEP = 'command-timeout-sweep';
 
 export const queues = {
   webhookDelivery: new Queue(QUEUE_WEBHOOK_DELIVERY, { connection }),
@@ -37,6 +38,7 @@ export const queues = {
   offlineCheck: new Queue(QUEUE_OFFLINE_CHECK, { connection }),
   sms: new Queue(QUEUE_SMS, { connection }),
   tempUnlockSweep: new Queue(QUEUE_TEMP_UNLOCK_SWEEP, { connection }),
+  commandTimeoutSweep: new Queue(QUEUE_COMMAND_TIMEOUT_SWEEP, { connection }),
 };
 
 interface WebhookJob {
@@ -274,6 +276,66 @@ const workers = [
     },
     { connection, concurrency: 1 },
   ),
+
+  /**
+   * v2.8: sweep DeviceCommand rows whose timeoutAt has passed but the
+   * status is still pending/sent — APP crashed mid-flow, network died,
+   * gateway never replied, etc. Flip them to 'timeout' and raise the
+   * same alarm the per-command timeout job would have raised.
+   *
+   * Sweep is deliberately preferred over per-command delayed BullMQ
+   * jobs: it survives worker restarts, doesn't double-fire on retries,
+   * and gives one place to tune cadence.
+   */
+  new Worker(
+    QUEUE_COMMAND_TIMEOUT_SWEEP,
+    async () => {
+      const now = new Date();
+      const stale = await prisma.deviceCommand.findMany({
+        where: {
+          status: { in: ['pending', 'sent'] },
+          timeoutAt: { lte: now },
+        },
+        include: { device: { select: { id: true, lockId: true, ownerCompanyId: true } } },
+        take: 100, // bound per-tick work
+      });
+      if (stale.length === 0) return;
+
+      for (const cmd of stale) {
+        try {
+          await prisma.deviceCommand.update({
+            where: { id: cmd.id },
+            data: { status: 'timeout' },
+          });
+          const msg = `锁 ${cmd.device.lockId} 远程指令 ${cmd.commandType} 超时未响应（${cmd.link}）`;
+          await prisma.alarm.create({
+            data: {
+              deviceId: cmd.deviceId,
+              companyId: cmd.device.ownerCompanyId,
+              type: 'command_timeout',
+              severity: 'warning',
+              message: msg,
+              payload: {
+                commandId: cmd.id.toString(),
+                link: cmd.link,
+              },
+            },
+          });
+          await alarmFanout({
+            companyId: cmd.device.ownerCompanyId,
+            severity: 'warning',
+            title: '指令超时',
+            body: msg,
+            link: `/devices/${cmd.deviceId}`,
+          });
+        } catch (err) {
+          log.warn({ err, commandId: cmd.id.toString() }, 'command-timeout sweep step failed');
+        }
+      }
+      log.info({ timedOut: stale.length }, 'command-timeout sweep');
+    },
+    { connection, concurrency: 1 },
+  ),
 ];
 
 // Fan-out: subscribe to Redis pub/sub channels.
@@ -368,6 +430,17 @@ await queues.tempUnlockSweep.add(
   {
     repeat: { every: 60 * 1000 }, // every minute
     jobId: 'temp-unlock-sweep-singleton',
+  },
+);
+// v2.8: catch BLE/4G/LoRa commands the device or APP never acked.
+// Cadence is 30 s — short enough that worst-case slop on a 60 s
+// timeout is <100 %, long enough to keep a quiet DB quiet.
+await queues.commandTimeoutSweep.add(
+  'command-timeout-sweep',
+  {},
+  {
+    repeat: { every: 30 * 1000 },
+    jobId: 'command-timeout-sweep-singleton',
   },
 );
 
