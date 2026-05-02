@@ -5,6 +5,7 @@ import { Prisma } from '@abd/db';
 import { prisma } from '@abd/db';
 import {
   ApiError,
+  BulkAuthorizeSchema,
   CreateTestDeviceSchema,
   DeployDeviceSchema,
   DeviceListQuerySchema,
@@ -757,6 +758,149 @@ export default async function deviceRoutes(app: FastifyInstance) {
         total,
         page,
         pageSize,
+      };
+    },
+  );
+
+  /**
+   * v2.7 QA P0: bulk N×M authorisation (deviceIds × userIds → one
+   * user-scope device_assignment per pair).
+   *
+   * Existing open user-scope grants for the same (device, user) pair
+   * are revoked first so calling this with overlapping inputs just
+   * "extends" or "shifts" the validity window cleanly. Team-scope
+   * rows are left untouched — they're a different broader grant the
+   * admin may have intentionally set up.
+   *
+   * For the simpler "single team" case the existing
+   * POST /devices/assign is more ergonomic and does the same thing
+   * for a team-scope grant. This endpoint is for the picker UX
+   * where the admin selected N devices and M people on a single
+   * page and wants one-shot N×M.
+   */
+  typed.post(
+    '/authorizations',
+    {
+      onRequest: [
+        app.authenticate,
+        requireRole('vendor_admin', 'company_admin', 'dept_admin'),
+      ],
+      schema: { body: BulkAuthorizeSchema },
+    },
+    async (req, reply) => {
+      const ctx = getAuthContext(req);
+      const { deviceIds, userIds, validFrom, validUntil, reason } = req.body;
+
+      const vf = validFrom ? new Date(validFrom) : null;
+      const vu = validUntil ? new Date(validUntil) : null;
+      if (vf && vu && vf >= vu) {
+        throw ApiError.badRequest('validFrom must be before validUntil');
+      }
+      if (vu && vu < new Date()) {
+        throw ApiError.badRequest('validUntil is already in the past');
+      }
+
+      const dIds = deviceIds.map((n) => BigInt(n));
+      const uIds = userIds.map((n) => BigInt(n));
+
+      const scope = scopeToCompany(ctx);
+      // Devices: must exist + belong to caller's company scope.
+      const devices = await prisma.device.findMany({
+        where: {
+          id: { in: dIds },
+          deletedAt: null,
+          ...(scope.companyId ? { ownerCompanyId: scope.companyId } : {}),
+        },
+        select: { id: true, ownerCompanyId: true, lockId: true },
+      });
+      if (devices.length !== dIds.length) {
+        throw ApiError.conflict(
+          `${dIds.length - devices.length} device(s) not found or out of scope`,
+        );
+      }
+      // Devices may legitimately span multiple companies for a vendor
+      // admin, but for company/dept admin everything must be in the
+      // caller's own company; scope filter above already enforces that.
+
+      // Users: must exist + share a company with the device they're
+      // being granted on. We pre-fetch them all and pair-match below.
+      const users = await prisma.user.findMany({
+        where: {
+          id: { in: uIds },
+          deletedAt: null,
+          ...(scope.companyId ? { companyId: scope.companyId } : {}),
+        },
+        select: { id: true, companyId: true, name: true, phone: true },
+      });
+      if (users.length !== uIds.length) {
+        throw ApiError.conflict(
+          `${uIds.length - users.length} user(s) not found or out of scope`,
+        );
+      }
+      const userById = new Map(users.map((u) => [u.id.toString(), u]));
+
+      const now = new Date();
+      const result = await prisma.$transaction(async (tx) => {
+        const created: Array<{
+          id: bigint;
+          deviceId: bigint;
+          userId: bigint;
+        }> = [];
+        let revokedCount = 0;
+
+        for (const device of devices) {
+          for (const userId of uIds) {
+            const user = userById.get(userId.toString())!;
+            // Cross-company check: device must belong to the user's
+            // company. Vendor admins might mix devices across
+            // companies; in that case skip pairs that don't match
+            // rather than throwing — the response surfaces the count.
+            if (device.ownerCompanyId !== user.companyId) {
+              continue;
+            }
+            // Revoke any open user-scope grant for this (device, user)
+            // so re-granting is idempotent (updates the window).
+            const revoked = await tx.deviceAssignment.updateMany({
+              where: {
+                deviceId: device.id,
+                userId,
+                scope: 'user',
+                revokedAt: null,
+              },
+              data: { revokedAt: now },
+            });
+            revokedCount += revoked.count;
+            const a = await tx.deviceAssignment.create({
+              data: {
+                deviceId: device.id,
+                companyId: user.companyId!,
+                scope: 'user',
+                userId,
+                grantedByUserId: ctx.userId,
+                validFrom: vf,
+                validUntil: vu,
+              },
+            });
+            created.push({ id: a.id, deviceId: device.id, userId });
+          }
+        }
+        return { created, revokedCount };
+      });
+
+      reply.code(201);
+      return {
+        createdCount: result.created.length,
+        revokedCount: result.revokedCount,
+        skippedCount:
+          devices.length * uIds.length - result.created.length,
+        items: result.created.map((c) => ({
+          id: c.id.toString(),
+          deviceId: c.deviceId.toString(),
+          userId: c.userId.toString(),
+        })),
+        reason: reason ?? null,
+        validFrom: vf?.toISOString() ?? null,
+        validUntil: vu?.toISOString() ?? null,
       };
     },
   );

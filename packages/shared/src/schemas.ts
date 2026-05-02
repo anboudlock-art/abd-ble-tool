@@ -241,6 +241,21 @@ export const AssignDevicesSchema = z.object({
 });
 export type AssignDevicesInput = z.infer<typeof AssignDevicesSchema>;
 
+/**
+ * v2.7 QA P0: bulk authorise N devices to M users in one shot.
+ * Each (device, user) pair becomes one user-scope device_assignment.
+ * Existing open user-scope grants for the same pair get revoked first
+ * so a re-grant updates the validity window cleanly.
+ */
+export const BulkAuthorizeSchema = z.object({
+  deviceIds: z.array(z.coerce.number().int().positive()).min(1).max(1000),
+  userIds: z.array(z.coerce.number().int().positive()).min(1).max(100),
+  validFrom: z.string().datetime().optional(),
+  validUntil: z.string().datetime().optional(),
+  reason: z.string().max(255).optional(),
+});
+export type BulkAuthorizeInput = z.infer<typeof BulkAuthorizeSchema>;
+
 export const DeployDeviceSchema = z.object({
   lat: z.number().min(-90).max(90),
   lng: z.number().min(-180).max(180),
