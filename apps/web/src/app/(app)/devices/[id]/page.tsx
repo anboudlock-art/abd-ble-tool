@@ -4,7 +4,7 @@ import { use, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, MapPin, Pencil, Trash2 } from 'lucide-react';
+import { ArrowLeft, MapPin, Pencil, Trash2, Wrench } from 'lucide-react';
 import {
   apiRequest,
   type Device,
@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/Button';
 import { RemoteControl } from '@/components/RemoteControl';
 import { EditDeviceDialog } from '@/components/EditDeviceDialog';
 import { DeployDialog } from '@/components/DeployDialog';
+import { RepairIntakeDialog } from '@/components/RepairIntakeDialog';
 import { DeviceMap } from '@/components/DeviceMap';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -45,6 +46,7 @@ export default function DeviceDetailPage({
   const router = useRouter();
   const [showEdit, setShowEdit] = useState(false);
   const [showDeploy, setShowDeploy] = useState(false);
+  const [showRepair, setShowRepair] = useState(false);
   const isVendor = me?.role === 'vendor_admin';
   const canEdit = isVendor || me?.role === 'company_admin';
 
@@ -105,6 +107,11 @@ export default function DeviceDetailPage({
                   <Button variant="secondary" onClick={() => setShowDeploy(true)}>
                     <MapPin size={14} />{' '}
                     {d.status === 'active' ? '更新部署位置' : '现场部署'}
+                  </Button>
+                ) : null}
+                {d.status !== 'repairing' && d.status !== 'retired' ? (
+                  <Button variant="secondary" onClick={() => setShowRepair(true)}>
+                    <Wrench size={14} /> 退修
                   </Button>
                 ) : null}
                 <Button variant="secondary" onClick={() => setShowEdit(true)}>
@@ -209,6 +216,15 @@ export default function DeviceDetailPage({
           initialDoorLabel={d.doorLabel}
           onClose={() => setShowDeploy(false)}
           onDeployed={() => setShowDeploy(false)}
+        />
+      ) : null}
+
+      {showRepair ? (
+        <RepairIntakeDialog
+          deviceId={d.id}
+          lockId={d.lockId}
+          onClose={() => setShowRepair(false)}
+          onIntake={() => setShowRepair(false)}
         />
       ) : null}
 

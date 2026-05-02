@@ -617,6 +617,134 @@ export default async function deviceRoutes(app: FastifyInstance) {
     },
   );
 
+  /**
+   * v2.6 §3.6 授权管理. List all device_assignment rows in the caller's
+   * scope, computing one of:
+   *   active   — no validUntil, or validUntil in the future
+   *   expiring — validUntil within the next 7 days
+   *   expired  — validUntil already in the past
+   *   revoked  — revokedAt set
+   * Filtered server-side by `state` query.
+   */
+  typed.get(
+    '/authorizations',
+    {
+      onRequest: [app.authenticate],
+      schema: {
+        querystring: z.object({
+          page: z.coerce.number().int().min(1).default(1),
+          pageSize: z.coerce.number().int().min(1).max(100).default(50),
+          state: z.enum(['active', 'expiring', 'expired', 'revoked']).optional(),
+          deviceId: z.coerce.number().int().positive().optional(),
+          userId: z.coerce.number().int().positive().optional(),
+          teamId: z.coerce.number().int().positive().optional(),
+        }),
+      },
+    },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const sc = scopeToCompany(ctx);
+      const { page, pageSize, state, deviceId, userId, teamId } = req.query;
+      const now = new Date();
+      const soon = new Date(now.getTime() + 7 * 24 * 3600 * 1000);
+
+      const where: Prisma.DeviceAssignmentWhereInput = {
+        ...(sc.companyId ? { companyId: sc.companyId } : {}),
+        ...(deviceId ? { deviceId: BigInt(deviceId) } : {}),
+        ...(userId ? { userId: BigInt(userId) } : {}),
+        ...(teamId ? { teamId: BigInt(teamId) } : {}),
+      };
+
+      if (state === 'revoked') {
+        where.revokedAt = { not: null };
+      } else if (state === 'expired') {
+        where.revokedAt = null;
+        where.validUntil = { lte: now };
+      } else if (state === 'expiring') {
+        where.revokedAt = null;
+        where.validUntil = { gt: now, lte: soon };
+      } else if (state === 'active') {
+        where.revokedAt = null;
+        where.OR = [{ validUntil: null }, { validUntil: { gt: now } }];
+      }
+
+      const [items, total] = await Promise.all([
+        prisma.deviceAssignment.findMany({
+          where,
+          orderBy: { id: 'desc' },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          include: {
+            device: { select: { id: true, lockId: true, doorLabel: true } },
+            team: { select: { id: true, name: true } },
+            user: { select: { id: true, name: true, phone: true } },
+          },
+        }),
+        prisma.deviceAssignment.count({ where }),
+      ]);
+
+      const computeState = (
+        a: { revokedAt: Date | null; validUntil: Date | null },
+      ): 'active' | 'expiring' | 'expired' | 'revoked' => {
+        if (a.revokedAt) return 'revoked';
+        if (!a.validUntil) return 'active';
+        if (a.validUntil <= now) return 'expired';
+        if (a.validUntil <= soon) return 'expiring';
+        return 'active';
+      };
+
+      return {
+        items: items.map((a) => ({
+          id: a.id.toString(),
+          deviceId: a.device.id.toString(),
+          lockId: a.device.lockId,
+          doorLabel: a.device.doorLabel,
+          scope: a.scope,
+          teamId: a.team?.id.toString() ?? null,
+          teamName: a.team?.name ?? null,
+          userId: a.user?.id.toString() ?? null,
+          userName: a.user?.name ?? null,
+          userPhone: a.user?.phone ?? null,
+          validFrom: a.validFrom?.toISOString() ?? null,
+          validUntil: a.validUntil?.toISOString() ?? null,
+          revokedAt: a.revokedAt?.toISOString() ?? null,
+          createdAt: a.createdAt.toISOString(),
+          state: computeState(a),
+        })),
+        total,
+        page,
+        pageSize,
+      };
+    },
+  );
+
+  /** Revoke a single device_assignment row. company_admin scope. */
+  typed.post(
+    '/authorizations/:id/revoke',
+    {
+      onRequest: [
+        app.authenticate,
+        requireRole('vendor_admin', 'company_admin', 'dept_admin'),
+      ],
+      schema: { params: z.object({ id: z.coerce.number().int().positive() }) },
+    },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const id = BigInt(req.params.id);
+      const a = await prisma.deviceAssignment.findUnique({ where: { id } });
+      if (!a) throw ApiError.notFound();
+      if (ctx.role !== 'vendor_admin' && a.companyId !== ctx.companyId) {
+        throw ApiError.forbidden();
+      }
+      if (a.revokedAt) throw ApiError.conflict('Already revoked');
+      const updated = await prisma.deviceAssignment.update({
+        where: { id },
+        data: { revokedAt: new Date() },
+      });
+      return { id: updated.id.toString(), revokedAt: updated.revokedAt!.toISOString() };
+    },
+  );
+
   /** APP convenience: device current state (last reported) + battery. */
   typed.get(
     '/devices/:id/status',

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { AlertTriangle, Boxes, Building2, ClipboardList, Cpu, KeyRound, LayoutDashboard, Lock, LogOut, Plug, Radio, UsersRound } from 'lucide-react';
+import { AlertTriangle, Boxes, Building2, ClipboardList, Clock3, Cpu, Factory, Hash, KeyRound, LayoutDashboard, ListChecks, Lock, LogOut, Plug, Radio, ShieldCheck, UsersRound, Wrench } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -15,13 +15,49 @@ interface NavItem {
 
 const items: NavItem[] = [
   { href: '/dashboard', label: '概览', icon: LayoutDashboard },
+  {
+    href: '/warehouses',
+    label: '三库总览',
+    icon: Factory,
+    roles: ['vendor_admin'],
+  },
   { href: '/devices', label: '设备', icon: Lock },
+  {
+    href: '/authorizations',
+    label: '授权管理',
+    icon: ListChecks,
+    roles: ['vendor_admin', 'company_admin', 'dept_admin'],
+  },
   { href: '/alarms', label: '告警', icon: AlertTriangle },
+  {
+    href: '/permission-approvals',
+    label: '权限审批',
+    icon: ShieldCheck,
+    roles: ['vendor_admin', 'company_admin', 'dept_admin'],
+  },
+  {
+    href: '/temporary-approvals',
+    label: '临开审批',
+    icon: Clock3,
+    roles: ['vendor_admin', 'company_admin', 'dept_admin', 'team_leader'],
+  },
   {
     href: '/batches',
     label: '生产批次',
     icon: Boxes,
     roles: ['vendor_admin', 'production_operator'],
+  },
+  {
+    href: '/lock-numbers',
+    label: '锁号生成器',
+    icon: Hash,
+    roles: ['vendor_admin'],
+  },
+  {
+    href: '/repairs',
+    label: '维修中库',
+    icon: Wrench,
+    roles: ['vendor_admin', 'company_admin', 'production_operator'],
   },
   { href: '/companies', label: '客户公司', icon: Building2, roles: ['vendor_admin'] },
   {

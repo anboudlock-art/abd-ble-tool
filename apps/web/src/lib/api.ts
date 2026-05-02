@@ -616,3 +616,125 @@ export interface FirmwareTaskListResp {
   page: number;
   pageSize: number;
 }
+
+// ----- v2.6 Permission requests + temporary unlock -----
+
+export interface PermissionRequestItem {
+  deviceId: string;
+  status: 'pending' | 'approved' | 'rejected';
+  assignmentId: string | null;
+}
+
+export interface PermissionRequest {
+  id: string;
+  ulid: string;
+  applicantUserId: string;
+  companyId: string;
+  reason: string;
+  validFrom: string | null;
+  validUntil: string | null;
+  status: 'pending' | 'approved' | 'partial' | 'rejected' | 'cancelled';
+  decidedByUserId: string | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
+  items: PermissionRequestItem[];
+  createdAt: string;
+}
+
+export interface PermissionRequestPendingItem extends PermissionRequest {
+  applicant: { id: string; name: string; phone: string };
+  devices: Array<{
+    deviceId: string;
+    lockId: string;
+    status: 'pending' | 'approved' | 'rejected';
+  }>;
+}
+
+export interface TemporaryUnlock {
+  id: string;
+  ulid: string;
+  applicantUserId: string;
+  companyId: string;
+  deviceId: string;
+  reason: string;
+  durationMinutes: 60 | 120 | 240 | 480;
+  emergency: boolean;
+  status: 'pending' | 'approved' | 'rejected' | 'expired' | 'revoked' | 'cancelled';
+  approvedAt: string | null;
+  validUntil: string | null;
+  decidedByUserId: string | null;
+  decisionNote: string | null;
+  assignmentId: string | null;
+  remainingSeconds: number | null;
+  createdAt: string;
+}
+
+export interface TemporaryUnlockPendingItem extends TemporaryUnlock {
+  applicant: { id: string; name: string; phone: string };
+  device: { id: string; lockId: string; doorLabel: string | null };
+}
+
+// ----- v2.6 Repair flow -----
+
+export interface DeviceRepair {
+  id: string;
+  ulid: string;
+  deviceId: string;
+  sourceCompanyId: string | null;
+  priorStatus: string;
+  faultReason: string;
+  status:
+    | 'intake'
+    | 'diagnosing'
+    | 'repairing'
+    | 'awaiting_parts'
+    | 'repaired'
+    | 'irreparable'
+    | 'returned';
+  intakeByUserId: string | null;
+  repairedByUserId: string | null;
+  notes: string | null;
+  partsReplaced: unknown;
+  intakeAt: string;
+  repairedAt: string | null;
+  closedAt: string | null;
+}
+
+export interface DeviceRepairListItem extends DeviceRepair {
+  device: { id: string; lockId: string; bleMac: string };
+  sourceCompanyName: string | null;
+}
+
+export interface DeviceRepairListResp {
+  items: DeviceRepairListItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+// ----- v2.6 Authorizations (long-lived assignments) -----
+
+export interface Authorization {
+  id: string;
+  deviceId: string;
+  lockId: string;
+  doorLabel: string | null;
+  scope: 'company' | 'team' | 'user';
+  teamId: string | null;
+  teamName: string | null;
+  userId: string | null;
+  userName: string | null;
+  userPhone: string | null;
+  validFrom: string | null;
+  validUntil: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+  state: 'active' | 'expiring' | 'expired' | 'revoked';
+}
+
+export interface AuthorizationListResp {
+  items: Authorization[];
+  total: number;
+  page: number;
+  pageSize: number;
+}

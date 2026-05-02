@@ -428,3 +428,198 @@ export const CreateFirmwareTaskSchema = z.object({
   scheduledAt: z.string().datetime().optional(),
 });
 export type CreateFirmwareTaskInput = z.infer<typeof CreateFirmwareTaskSchema>;
+
+// -------------------- v2.6 Permission requests + temporary unlock --------------------
+
+/// D1: long-term unlock permission for N devices, partial-approval allowed.
+export const CreatePermissionRequestSchema = z.object({
+  deviceIds: z.array(z.coerce.number().int().positive()).min(1).max(200),
+  reason: z.string().min(1).max(500),
+  /// Optional time window the requester wants. null = forever.
+  validFrom: z.string().datetime().optional(),
+  validUntil: z.string().datetime().optional(),
+});
+export type CreatePermissionRequestInput = z.infer<typeof CreatePermissionRequestSchema>;
+
+export const PermissionRequestStatusEnum = z.enum([
+  'pending',
+  'approved',
+  'partial',
+  'rejected',
+  'cancelled',
+]);
+
+export const PermissionRequestListQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  status: PermissionRequestStatusEnum.optional(),
+  /// "mine" = my own (default for non-admin), "company" = whole company (admins).
+  scope: z.enum(['mine', 'company']).default('mine'),
+});
+export type PermissionRequestListQuery = z.infer<typeof PermissionRequestListQuerySchema>;
+
+/// H2: per-item decision payload. Each entry is one device in the request.
+export const ApprovePermissionRequestSchema = z.object({
+  /// Per-device decisions. Items the approver doesn't list keep status=pending,
+  /// which forces them to come back to it (encourages explicit decisions).
+  decisions: z
+    .array(
+      z.object({
+        deviceId: z.coerce.number().int().positive(),
+        decision: z.enum(['approve', 'reject']),
+      }),
+    )
+    .min(1),
+  decisionNote: z.string().max(500).optional(),
+});
+export type ApprovePermissionRequestInput = z.infer<typeof ApprovePermissionRequestSchema>;
+
+/// E1: single-device, time-bounded unlock. Window is one of the four steps
+/// (1h / 2h / 4h / 8h). emergency=true bumps the request to top of queue
+/// and (when SMS is configured) pages approvers.
+export const CreateTemporaryUnlockSchema = z.object({
+  deviceId: z.coerce.number().int().positive(),
+  reason: z.string().min(1).max(500),
+  durationMinutes: z.union([
+    z.literal(60),
+    z.literal(120),
+    z.literal(240),
+    z.literal(480),
+  ]),
+  emergency: z.boolean().default(false),
+});
+export type CreateTemporaryUnlockInput = z.infer<typeof CreateTemporaryUnlockSchema>;
+
+export const TemporaryUnlockStatusEnum = z.enum([
+  'pending',
+  'approved',
+  'rejected',
+  'expired',
+  'revoked',
+  'cancelled',
+]);
+
+export const TemporaryUnlockListQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  status: TemporaryUnlockStatusEnum.optional(),
+  scope: z.enum(['mine', 'company']).default('mine'),
+});
+export type TemporaryUnlockListQuery = z.infer<typeof TemporaryUnlockListQuerySchema>;
+
+export const ApproveTemporaryUnlockSchema = z.object({
+  decision: z.enum(['approve', 'reject']),
+  decisionNote: z.string().max(500).optional(),
+});
+export type ApproveTemporaryUnlockInput = z.infer<typeof ApproveTemporaryUnlockSchema>;
+
+// -------------------- v2.6 production test (12 items) --------------------
+
+/**
+ * Canonical keys for the 12-item production test (v2.6 §2.1).
+ *  6 automated + 2 environmental + 4 manual = 12.
+ * The set is stable inside one batch but may evolve over time, so we store
+ * the test results as JSON keyed by these strings on production_scan.
+ */
+export const ProductionTestItemKeys = [
+  // automated
+  'ble_comm',
+  '4g_uplink',
+  'gps_fix',
+  'battery_voltage',
+  'power_draw',
+  'firmware_version',
+  // environmental
+  'temp_endurance',
+  'waterproof_ip67',
+  // manual
+  'lock_mechanism',
+  'cosmetic',
+  'indicator_lamp',
+  'accessories',
+] as const;
+export type ProductionTestItemKey = (typeof ProductionTestItemKeys)[number];
+
+const TestItemResultSchema = z.object({
+  pass: z.boolean(),
+  /** Optional measured value, e.g. battery=3.84, power=12mA. */
+  value: z.union([z.string(), z.number()]).optional(),
+  note: z.string().max(255).optional(),
+});
+
+export const ProductionTestItemsSchema = z
+  .record(z.enum(ProductionTestItemKeys), TestItemResultSchema)
+  .refine((v) => Object.keys(v).length > 0, 'at least one test item required');
+export type ProductionTestItems = z.infer<typeof ProductionTestItemsSchema>;
+
+/// B2: batch submit production scans. One row per device, allows partial
+/// 12-item result via testItems map.
+export const BatchProductionScanSchema = z.object({
+  scans: z
+    .array(
+      ProductionScanSchema.extend({
+        testItems: ProductionTestItemsSchema.optional(),
+      }),
+    )
+    .min(1)
+    .max(500),
+});
+export type BatchProductionScanInput = z.infer<typeof BatchProductionScanSchema>;
+
+// -------------------- v2.6 lock number generator --------------------
+
+/// 0.2: vendor_admin generates pre-printed lock IDs in batches.
+/// `month` 1-12, `year` 4-digit. lockId = (year mod 10) (month%02d) (seq%05d).
+export const GenerateLockNumbersSchema = z.object({
+  batchId: z.coerce.number().int().positive(),
+  year: z.coerce.number().int().min(2024).max(2099),
+  month: z.coerce.number().int().min(1).max(12),
+  startSeq: z.coerce.number().int().min(1).max(99999).default(1),
+  count: z.coerce.number().int().min(1).max(10_000),
+});
+export type GenerateLockNumbersInput = z.infer<typeof GenerateLockNumbersSchema>;
+
+// -------------------- v2.6 device repair flow --------------------
+
+export const RepairStatusEnum = z.enum([
+  'intake',
+  'diagnosing',
+  'repairing',
+  'awaiting_parts',
+  'repaired',
+  'irreparable',
+  'returned',
+]);
+export type RepairStatusValue = z.infer<typeof RepairStatusEnum>;
+
+export const CreateRepairIntakeSchema = z.object({
+  /// Optional — defaults to the device's current owner_company_id.
+  sourceCompanyId: z.coerce.number().int().positive().optional(),
+  faultReason: z.string().min(1).max(255),
+  notes: z.string().max(2000).optional(),
+});
+export type CreateRepairIntakeInput = z.infer<typeof CreateRepairIntakeSchema>;
+
+export const UpdateRepairStatusSchema = z.object({
+  status: z.enum(['diagnosing', 'repairing', 'awaiting_parts', 'repaired', 'irreparable']),
+  notes: z.string().max(2000).optional(),
+  partsReplaced: z.array(z.string().max(64)).max(50).optional(),
+});
+export type UpdateRepairStatusInput = z.infer<typeof UpdateRepairStatusSchema>;
+
+export const CloseRepairSchema = z.object({
+  /// Where the repaired device should land:
+  ///   restore: back to its prior status (default; for repairable cases)
+  ///   retire:  device → retired (for irreparable cases)
+  resolution: z.enum(['restore', 'retire']).default('restore'),
+  notes: z.string().max(2000).optional(),
+});
+export type CloseRepairInput = z.infer<typeof CloseRepairSchema>;
+
+export const RepairListQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(50),
+  status: RepairStatusEnum.optional(),
+  sourceCompanyId: z.coerce.number().int().positive().optional(),
+});
+export type RepairListQuery = z.infer<typeof RepairListQuerySchema>;

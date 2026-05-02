@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Beaker, BoxSelect, Download, FileUp, Pencil, Plus, Search, Trash2, Truck, UsersRound } from 'lucide-react';
@@ -41,8 +42,15 @@ const STATUS_OPTIONS = [
 
 export default function DevicesPage() {
   const { user } = useAuth();
+  const searchParams = useSearchParams();
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
+
+  // Pre-fill the status filter from URL ?status=manufactured (warehouse drill-down)
+  useEffect(() => {
+    const s = searchParams?.get('status');
+    if (s) setStatus(s);
+  }, [searchParams]);
   const [modelId, setModelId] = useState('');
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
