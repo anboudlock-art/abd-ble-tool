@@ -8,7 +8,7 @@
 
 ---
 
-## 修改概览（9 项）
+## 修改概览（8 项）
 
 | # | 分类 | 修改点 | 涉及文件 |
 |---|------|--------|----------|
@@ -330,18 +330,6 @@ prisma.device.findMany({
 
 ---
 
-## 9. Nginx 加 admin.abdlock.cn 域名
-
-**文件：** `/etc/nginx/sites-enabled/abdlock`
-
-修改 `server_name` 行：
-```nginx
-server_name abdlock.com www.abdlock.com admin.abdlock.cn;
-```
-
-然后 `nginx -t && systemctl reload nginx`
-
----
 
 ## 📊 新建文件清单
 
