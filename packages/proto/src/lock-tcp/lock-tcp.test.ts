@@ -157,3 +157,97 @@ test('encodeUnlock + encodeQueryStatus produce valid frames', () => {
   assert.equal(qout.frame.addr, 0x81);
   assert.equal(qout.frame.payload[2], 0x12); // query sub-cmd
 });
+
+import {
+  imsiFromLoginPayload,
+  parseGpsBlock,
+  batteryFromGps,
+  lockStatusFromGps,
+  LockStatus,
+  encodeTimeSync,
+  parseStatusResponse,
+} from './index.js';
+
+test('imsiFromLoginPayload extracts the 15-char ASCII IMSI suffix', () => {
+  // 26 bytes of GPS-block dummy + 15 bytes ASCII IMSI
+  const p = Buffer.alloc(41);
+  Buffer.from('8911026C0032832', 'ascii').copy(p, 26);
+  assert.equal(imsiFromLoginPayload(p), '8911026C0032832');
+});
+
+test('imsiFromLoginPayload returns null when missing/zero', () => {
+  // <41 byte payload
+  assert.equal(imsiFromLoginPayload(Buffer.alloc(30)), null);
+  // all-zero IMSI section
+  const allZero = Buffer.alloc(41);
+  assert.equal(imsiFromLoginPayload(allZero), null);
+});
+
+test('parseGpsBlock decodes lat/lng and alarm bytes', () => {
+  // Build a 26-byte block: ts=1, lat=22deg30.12345', lng=113deg30.6789'
+  // BCD packing: 22 30 12 34 = bytes [0x22, 0x30, 0x12, 0x34], same for lng.
+  const p = Buffer.alloc(26);
+  p.writeUInt32BE(1, 0);
+  p.set([0x22, 0x30, 0x12, 0x34], 4);   // 22 30.1234
+  p.set([0x11, 0x33, 0x06, 0x78], 8);   // 113 30.0678 (4 BCD bytes ddd mm.mmmm)
+  p[12] = 0; // speed
+  p[13] = 0; // direction (N + E)
+  p[14] = 0;
+  p.set([0, 0, 0], 15); // distance
+  p.set([0, 0, 0], 18); // term status
+  p.set([0xaa, 0xbb, 87, LockStatus.LOCKED], 21); // A0 A1 A2(=87% bat) A3(=locked)
+  p[25] = 0;
+  const g = parseGpsBlock(p)!;
+  assert.ok(g);
+  assert.equal(g.timestamp, 1);
+  assert.ok(g.lat! > 22 && g.lat! < 23);
+  assert.ok(g.lng! > 113 && g.lng! < 114);
+  assert.equal(batteryFromGps(g), 87);
+  assert.equal(lockStatusFromGps(g), LockStatus.LOCKED);
+});
+
+test('parseGpsBlock returns null for short payload', () => {
+  assert.equal(parseGpsBlock(Buffer.alloc(20)), null);
+});
+
+test('encodeTimeSync produces a valid 26-byte frame with 20-char ASCII payload', () => {
+  const fixed = new Date('2026-03-25T12:16:20Z'); // UTC; +08 → 20:16:20
+  const buf = encodeTimeSync(0xdeadbeef, fixed, 8);
+  const out = decodeOne(buf)!;
+  assert.equal(out.frame.addr, 0x21);
+  assert.equal(out.frame.sub, 0x10);
+  assert.equal(out.frame.subLen, 0x14);
+  const ascii = out.frame.payload.toString('ascii');
+  assert.equal(ascii.length, 20);
+  // YY/MM/DD,hh:mm:ss+TZ
+  assert.match(ascii, /^\d{2}\/\d{2}\/\d{2},\d{2}:\d{2}:\d{2}\+\d{2}$/);
+  assert.equal(ascii, '26/03/25,20:16:20+08');
+});
+
+test('parseStatusResponse decodes the 0x12 query reply', () => {
+  // Body: [0x2A, 0x55, 0x12, lockId LE 4B, serial LE 2B, voltage, lockState] + 26B GPS
+  const body = Buffer.alloc(11 + 26);
+  body.set([0x2a, 0x55, 0x12], 0);
+  body.writeUInt32LE(0x12345678, 3);
+  body.writeUInt16LE(0xabcd, 7);
+  body[9] = 200; // voltage byte
+  body[10] = LockStatus.SEALED;
+  // 26B GPS — keep mostly zero, set alarms[3]=SEALED so it's coherent
+  body[11 + 21] = 0; // A0
+  body[11 + 23] = 75; // A2 = 75% bat
+  body[11 + 24] = LockStatus.SEALED; // A3
+  const r = parseStatusResponse(body)!;
+  assert.ok(r);
+  assert.equal(r.funcCode, 0x12);
+  assert.equal(r.reportSerial, 0xabcd);
+  assert.equal(r.voltageByte, 200);
+  assert.equal(r.lockState, LockStatus.SEALED);
+  assert.ok(r.gps);
+  assert.equal(batteryFromGps(r.gps!), 75);
+});
+
+test('parseStatusResponse rejects non-status body', () => {
+  const body = Buffer.alloc(11);
+  body.set([0xff, 0xff, 0x12], 0); // wrong magic
+  assert.equal(parseStatusResponse(body), null);
+});

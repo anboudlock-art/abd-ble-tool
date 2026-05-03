@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/Button';
 import { RemoteControl } from '@/components/RemoteControl';
 import { EditDeviceDialog } from '@/components/EditDeviceDialog';
 import { DeployDialog } from '@/components/DeployDialog';
+import { DeviceEventLog } from '@/components/DeviceEventLog';
 import { RepairIntakeDialog } from '@/components/RepairIntakeDialog';
 import { DeviceMap } from '@/components/DeviceMap';
 import { useAuth } from '@/providers/AuthProvider';
@@ -181,7 +182,26 @@ export default function DeviceDetailPage({
               {d.currentTeamName ?? '—'}
             </Item>
             <Item label="电量">
-              {d.lastBattery !== null ? `${d.lastBattery}%` : '—'}
+              {d.lastBattery == null ? (
+                '—'
+              ) : (
+                <span
+                  className={
+                    d.lastBattery < 20
+                      ? 'text-rose-500'
+                      : d.lastBattery < 50
+                        ? 'text-amber-500'
+                        : 'text-emerald-600'
+                  }
+                >
+                  {d.lastBattery}%
+                </span>
+              )}
+            </Item>
+            <Item label="锁状态">
+              <Badge tone={lockStateTone(d.lastState)}>
+                {lockStateLabel[d.lastState] ?? d.lastState ?? '—'}
+              </Badge>
             </Item>
             <Item label="最近上报">
               {d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString('zh-CN') : '—'}
@@ -363,8 +383,30 @@ export default function DeviceDetailPage({
           </Table>
         )}
       </Card>
+
+      <DeviceEventLog deviceId={id} />
     </div>
   );
+}
+
+/** v2.8 — Chinese label + colour tone for the LockState enum. */
+const lockStateLabel: Record<string, string> = {
+  opened: '开锁',
+  closed: '关锁',
+  tampered: '剪断报警',
+  unknown: '未知',
+};
+function lockStateTone(s: string | null | undefined): 'green' | 'amber' | 'red' | 'gray' {
+  switch (s) {
+    case 'opened':
+      return 'amber';
+    case 'closed':
+      return 'green';
+    case 'tampered':
+      return 'red';
+    default:
+      return 'gray';
+  }
 }
 
 function Item({ label, children }: { label: string; children: React.ReactNode }) {

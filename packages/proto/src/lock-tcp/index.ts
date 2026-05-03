@@ -188,12 +188,20 @@ export class FrameParser {
 
 // ---- Helpers for specific payloads ----
 
-/** Login payload offsets (extracted in handlers): MAC at [14..19], 4-byte server IP at [20..23], port at [24..25]. */
+/**
+ * Login payload offsets (per protocol manual 260225 §3.1.1):
+ *   [0..25]   26B GPS block
+ *     [14..19]  6B BLE MAC inside the GPS block
+ *     [20..23]  4B server IP        (handshake info)
+ *     [24..25]  2B server port      (handshake info)
+ *   [26..40]  15B IMSI ASCII (last 15 chars of operator IMSI)
+ */
 export const LOGIN_PAYLOAD = {
-  GPS_SECTION: { start: 0, end: 14 },
+  GPS_SECTION: { start: 0, end: 26 },
   BLE_MAC: { start: 14, end: 20 },
   SERVER_IP: { start: 20, end: 24 },
   SERVER_PORT: { start: 24, end: 26 },
+  IMSI: { start: 26, end: 41 },
 } as const;
 
 export function macFromLoginPayload(p: Buffer): string {
@@ -202,6 +210,214 @@ export function macFromLoginPayload(p: Buffer): string {
   return Array.from(mac)
     .map((b) => b.toString(16).padStart(2, '0').toUpperCase())
     .join(':');
+}
+
+/** v2.8: pull the 15-char IMSI suffix the firmware appends after the
+ *  GPS block. Returns null if absent (older firmware) or all-zero. */
+export function imsiFromLoginPayload(p: Buffer): string | null {
+  if (p.length < 41) return null;
+  const slice = p.subarray(26, 41);
+  // Strip non-printable nulls; IMSI is upper ASCII alphanumeric.
+  const ascii = slice.toString('ascii').replace(/[^0-9A-Za-z]/g, '');
+  if (ascii.length === 0) return null;
+  if (/^0+$/.test(ascii)) return null;
+  return ascii;
+}
+
+// ---- 26B GPS block (per protocol §3.2.3) ----
+
+/** Mapped lock state from the alarm bits (per protocol §5.1). Different
+ *  firmware revisions reuse some codes; this list is what the official
+ *  manual 260225 documents and what the old platform displayed. */
+export const LockStatus = {
+  OPENED: 0x10,
+  HALF_LOCKED: 0x30,
+  SEALED: 0x40,
+  LOCKED: 0x50,
+  UNSEALED: 0x60,
+  CUT_ALARM: 0x71,
+} as const;
+export type LockStatusValue = (typeof LockStatus)[keyof typeof LockStatus];
+
+export interface GpsBlock {
+  /** Unix timestamp from the lock RTC (big-endian u32). */
+  timestamp: number;
+  /** Decimal degrees (negative for South). null = no fix. */
+  lat: number | null;
+  lng: number | null;
+  speedKnots: number;
+  /** Raw byte 13 — direction + GPS flag bits. */
+  directionFlag: number;
+  /** Raw byte 14 — GPS antenna + fix flag + driver id. */
+  antennaFlag: number;
+  /** Cumulative distance in meters or kilometres depending on fw. */
+  cumulativeDistance: number;
+  /** Three terminal-status bytes (raw). */
+  terminalStatus: [number, number, number];
+  /** Four alarm-status bytes A0..A3 (per §5.4). A2 = battery percent.
+   *  A3 = mapped lock-state code (one of LockStatus). */
+  alarms: [number, number, number, number];
+}
+
+/**
+ * Parse the 26-byte GPS block found at the head of LOGIN, GPS, and
+ * status-response frames. Returns null when the block is shorter than
+ * 26 bytes (corrupt payload).
+ */
+export function parseGpsBlock(p: Buffer): GpsBlock | null {
+  if (p.length < 26) return null;
+  const lat = bcdLatLngToDecimal(p.subarray(4, 8), false);
+  const lng = bcdLatLngToDecimal(p.subarray(8, 12), true);
+  const sFlag = p[13]!;
+  const south = (sFlag & 0x80) !== 0;
+  const west = (sFlag & 0x40) !== 0;
+  return {
+    timestamp: p.readUInt32BE(0),
+    lat: lat == null ? null : south ? -lat : lat,
+    lng: lng == null ? null : west ? -lng : lng,
+    speedKnots: p[12]!,
+    directionFlag: sFlag,
+    antennaFlag: p[14]!,
+    cumulativeDistance: (p[15]! << 16) | (p[16]! << 8) | p[17]!,
+    terminalStatus: [p[18]!, p[19]!, p[20]!],
+    alarms: [p[21]!, p[22]!, p[23]!, p[24]!],
+  };
+}
+
+/** A2 byte == battery percent (0..100). 0xFF = unknown. */
+export function batteryFromGps(g: GpsBlock): number | null {
+  const a2 = g.alarms[2];
+  if (a2 === 0xff) return null;
+  if (a2 < 0 || a2 > 100) return null;
+  return a2;
+}
+
+/** A3 byte == mapped lock state (one of LockStatus). */
+export function lockStatusFromGps(g: GpsBlock): LockStatusValue | null {
+  const a3 = g.alarms[3];
+  switch (a3) {
+    case LockStatus.OPENED:
+    case LockStatus.HALF_LOCKED:
+    case LockStatus.SEALED:
+    case LockStatus.LOCKED:
+    case LockStatus.UNSEALED:
+    case LockStatus.CUT_ALARM:
+      return a3 as LockStatusValue;
+    default:
+      return null;
+  }
+}
+
+/**
+ * BCD lat/lng decoder. The firmware ships ddmm.mmmm packed as 8 BCD
+ * digits in 4 big-endian bytes for lat (and dddmm.mmmm = 9 digits in
+ * 4.5 bytes — we read 4 bytes and treat the leading nibble as zero
+ * for lat). Returns absolute degrees; sign comes from the direction
+ * flag in byte 13 of the surrounding GPS block.
+ */
+function bcdLatLngToDecimal(bcd: Buffer, isLng: boolean): number | null {
+  if (bcd.every((b) => b === 0 || b === 0xff)) return null;
+  const digits: number[] = [];
+  for (const b of bcd) digits.push(b >> 4, b & 0x0f);
+  if (digits.some((d) => d > 9)) return null;
+  // 8 digits for lat (ddmm.mmmm), 9 digits for lng (dddmm.mmmm).
+  // Our 4 bytes give us 8 digits — for lng the firmware uses the
+  // top nibble of the first byte as the hundreds digit.
+  const str = digits.join('');
+  const degLen = isLng ? 3 : 2;
+  if (str.length < degLen + 2) return null;
+  const deg = Number.parseInt(str.slice(0, degLen), 10);
+  const min = Number.parseFloat(str.slice(degLen, degLen + 2) + '.' + str.slice(degLen + 2));
+  if (!Number.isFinite(deg) || !Number.isFinite(min)) return null;
+  const value = deg + min / 60;
+  if (isLng ? value > 180 : value > 90) return null;
+  return Number(value.toFixed(7));
+}
+
+// ---- Server-issued time-sync (Addr=0x21, Sub=0x10) ----
+
+/**
+ * v2.8 task 2: build the time-sync downlink the lock expects after
+ * each heartbeat. Format per protocol §3.2.1:
+ *   20 ASCII bytes "YY/MM/DD,hh:mm:ss+TZ"  (TZ = 2-char hour offset)
+ *
+ * Without this response the lock fires its 30-second idle reconnect
+ * loop.
+ */
+export function encodeTimeSync(lockSN: number, when: Date = new Date(), tzOffsetHours = 8): Buffer {
+  const utcMs = when.getTime() + tzOffsetHours * 3600 * 1000;
+  const local = new Date(utcMs);
+  const yy = String(local.getUTCFullYear() % 100).padStart(2, '0');
+  const mm = String(local.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(local.getUTCDate()).padStart(2, '0');
+  const hh = String(local.getUTCHours()).padStart(2, '0');
+  const mi = String(local.getUTCMinutes()).padStart(2, '0');
+  const ss = String(local.getUTCSeconds()).padStart(2, '0');
+  const tz = String(tzOffsetHours).padStart(2, '0');
+  const ascii = `${yy}/${mm}/${dd},${hh}:${mi}:${ss}+${tz}`;
+  if (ascii.length !== 20) {
+    throw new FrameError(`time-sync ascii must be 20 chars, got "${ascii}" (${ascii.length})`);
+  }
+  return encodeFrame({
+    lockSN,
+    addr: Cmd.CONFIG, // 0x21
+    sub: 0x10,
+    subLen: 0x14, // 20 bytes payload
+    payload: Buffer.from(ascii, 'ascii'),
+  });
+}
+
+// ---- 0x03/0x2D lock-status response (server-initiated query reply) ----
+
+export interface LockStatusResponse {
+  /** Echoed business sub-command. 0x12 for the query result. */
+  funcCode: number;
+  /** Echoed report serial so we can correlate to our DeviceCommand row. */
+  reportSerial: number;
+  /** Voltage byte from the response (0..255 ~ 0..maxV). */
+  voltageByte: number;
+  /** Mapped lock state, or null if it was outside the documented set. */
+  lockState: LockStatusValue | null;
+  /** GPS block decoded from the trailing portion. */
+  gps: GpsBlock | null;
+}
+
+/**
+ * Parse the body of a 0x03 / 0x2D status-response frame. Layout per
+ * protocol §3.3.2:
+ *   [0]    0x2A
+ *   [1]    0x55
+ *   [2]    response code (0x12 = status query)
+ *   [3..6] LockID (LE)
+ *   [7..8] report serial (LE)
+ *   [9]    voltage byte
+ *   [10]   lock state (one of LockStatus)
+ *   [11..36] 26B GPS block (optional)
+ *   [37..]  10B base-station block (ignored)
+ */
+export function parseStatusResponse(p: Buffer): LockStatusResponse | null {
+  if (p.length < 11) return null;
+  if (p[0] !== 0x2a || p[1] !== 0x55) return null;
+  const reportSerial = p.readUInt16LE(7);
+  const stateByte = p[10]!;
+  let lockState: LockStatusValue | null = null;
+  switch (stateByte) {
+    case LockStatus.OPENED:
+    case LockStatus.HALF_LOCKED:
+    case LockStatus.SEALED:
+    case LockStatus.LOCKED:
+    case LockStatus.UNSEALED:
+    case LockStatus.CUT_ALARM:
+      lockState = stateByte as LockStatusValue;
+  }
+  const gps = p.length >= 37 ? parseGpsBlock(p.subarray(11, 37)) : null;
+  return {
+    funcCode: p[2]!,
+    reportSerial,
+    voltageByte: p[9]!,
+    lockState,
+    gps,
+  };
 }
 
 /**

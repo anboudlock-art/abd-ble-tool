@@ -350,7 +350,10 @@ export const UpdateDeviceSchema = z.object({
   hardwareVersion: z.string().max(32).optional().nullable(),
   doorLabel: z.string().max(128).optional().nullable(),
   notes: z.string().max(2000).optional().nullable(),
-  iccid: z.string().regex(/^\d{19,20}$/).optional().nullable(),
+  // v2.8: ICCID can be alphanumeric uppercase per the 4GBLE093 IMSI
+  // section in the login frame (saw "8911026C0032832" in field traces).
+  // Allow a broader 15-22 char range over A-Z + digits.
+  iccid: z.string().regex(/^[0-9A-Za-z]{15,22}$/).optional().nullable(),
   fourgMac: z
     .string()
     .regex(/^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$/)

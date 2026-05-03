@@ -114,6 +114,77 @@ export default async function deviceRoutes(app: FastifyInstance) {
   );
 
   /**
+   * v2.8 device event log — paginated lock_event rows for the device
+   * detail page's "事件日志" tab. Mirrors the old platform's switch
+   * log table: most-recent first, includes battery + GPS + raw payload.
+   * Open to any caller in the device's company scope.
+   */
+  typed.get(
+    '/devices/:id/events',
+    {
+      onRequest: [app.authenticate],
+      schema: {
+        params: z.object({ id: z.coerce.number().int().positive() }),
+        querystring: z.object({
+          page: z.coerce.number().int().min(1).default(1),
+          pageSize: z.coerce.number().int().min(1).max(200).default(50),
+          eventType: z
+            .enum([
+              'opened',
+              'closed',
+              'tampered',
+              'heartbeat',
+              'low_battery',
+              'offline',
+              'online',
+            ])
+            .optional(),
+        }),
+      },
+    },
+    async (req) => {
+      const ctx = getAuthContext(req);
+      const id = BigInt(req.params.id);
+      const device = await prisma.device.findUnique({ where: { id } });
+      if (!device || device.deletedAt) throw ApiError.notFound();
+      const sc = scopeToCompany(ctx);
+      if (sc.companyId && device.ownerCompanyId !== sc.companyId) {
+        throw ApiError.forbidden();
+      }
+      const { page, pageSize, eventType } = req.query;
+      const where: Prisma.LockEventWhereInput = {
+        deviceId: id,
+        ...(eventType ? { eventType } : {}),
+      };
+      const [items, total] = await Promise.all([
+        prisma.lockEvent.findMany({
+          where,
+          orderBy: { createdAt: 'desc' },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+        prisma.lockEvent.count({ where }),
+      ]);
+      return {
+        items: items.map((e) => ({
+          id: e.id.toString(),
+          eventType: e.eventType,
+          source: e.source,
+          battery: e.battery,
+          lat: e.lat?.toString() ?? null,
+          lng: e.lng?.toString() ?? null,
+          createdAt: e.createdAt.toISOString(),
+          receivedAt: e.receivedAt.toISOString(),
+          operatorUserId: e.operatorUserId?.toString() ?? null,
+        })),
+        total,
+        page,
+        pageSize,
+      };
+    },
+  );
+
+  /**
    * Production APP's "look up before scan" endpoint — given a lockId (QR),
    * return whether the device is already registered.
    */
