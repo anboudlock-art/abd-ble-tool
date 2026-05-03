@@ -1,155 +1,269 @@
 # Claude Tasks — User & Device Flow Fix (v2.8.1)
 
-**Generated:** 2026-05-03 22:55  
+**Generated:** 2026-05-03  
 **Author:** 云智 (spec writer)  
 **Code:** Claude (sole impl)  
 
 ---
 
-## Task 1 [P0]: Edit User — Role / Name / Status / Phone
+## Overview
+
+Customer companies (子账号) need a complete device lifecycle experience, matching vendor admin (总账户) capabilities minus production/manufacturing features.
+
+**Design principle:** 子账号 = 总账户 - 生产功能 - 对接API - 固件OTA
+
+---
+
+## Task 1 [P0]: Edit User — Role / Name / Status
 
 ### Problem
-User list shows members but no edit button. Company admin cannot change user role (member→company_admin, etc.), name, or status. API `PUT /users/:id` exists but `UpdateUserSchema` is missing `role` field.
+User list has 新建/重置密码/删除 but no edit button. Company admin cannot change user roles. `UpdateUserSchema` is missing `role` field.
 
 ### Fix — Schema
 `packages/shared/src/schemas.ts` → `UpdateUserSchema`:
-Add an optional `role` field:
 ```ts
-role: z.enum([
-  'vendor_admin',
-  'company_admin',
-  'dept_admin',
-  'team_leader',
-  'member',
-  'production_operator',
-]).optional(),
+export const UpdateUserSchema = z.object({
+  name: z.string().min(1).max(64).optional(),
+  email: z.string().email().max(128).optional().nullable(),
+  employeeNo: z.string().max(32).optional().nullable(),
+  role: z.enum([
+    'company_admin',
+    'dept_admin', 
+    'team_leader',
+    'member',
+  ]).optional(),
+  status: z.enum(['active', 'locked']).optional(),
+});
 ```
+Note: company_admin can only assign roles up to their own level (no vendor_admin, no production_operator).
 
 ### Fix — API
 `apps/api/src/routes/users.ts` → `PUT /users/:id`:
-Already writes `role` if present in `req.body as never`. Confirm the role field is written. Add guard:
-- `company_admin` cannot change a user to `vendor_admin`
-- `company_admin` cannot promote above their own role level
+- Already writes role from body. Add guard: company_admin cannot promote to vendor_admin.
+- Return updated user with role.
 
 ### Fix — Web
 `apps/web/src/app/(app)/users/page.tsx`:
-- Add "编辑" button in action column (next to reset password / delete)
-- Click → modal form: name, phone, role (dropdown), status (active/locked)
-- Authed: `PUT /users/:id`
-- Show success toast, refresh list
-
-### Verification
-1. Vendor admin opens user list → sees edit button on every user
-2. Company admin opens user list → sees edit button only on own company's users
-3. Edit member → change to company_admin → save → role updated
-4. Try editing vendor_admin as company_admin → 403 forbidden
+- Add "编辑" button in action column
+- Modal form: name, phone, role (dropdown, filtered by allowed roles), status
+- Submit: `PUT /users/:id`
 
 ---
 
 ## Task 2 [P0]: Device Receiving — "确认收货" in Detail Page
 
 ### Problem
-When a device is `shipped` to a customer company, the company_admin can see the device but has no way to confirm receipt. The "确认入库" button only exists in batch select on device list, not in the device detail page.
-
-### Current Flow
-```
-shipped → (no UI) → delivered → (no UI) → assigned → active
-```
+`shipped` devices appear in company_admin's view but there's no "确认收货" button in the detail page. The batch "确认入库" only exists in device list multi-select.
 
 ### Fix
 `apps/web/src/app/(app)/devices/[id]/page.tsx`:
-When `d.status === 'shipped'` AND current user is company_admin of ownerCompanyId, show "确认收货" button.
-- Button: `<PackageCheck size={14} /> 确认收货`
-- Calls: `POST /api/v1/devices/deliver` with `{ deviceIds: [d.id] }`
-- On success: refetch device detail → status changes to `delivered`
+- When `status === 'shipped'` AND user's companyId === device.ownerCompanyId: show "确认收货" button
+- Button calls `POST /api/v1/devices/deliver` with `{ deviceIds: [id] }`
+- On success → status becomes `delivered`, refetch detail
 
-Also fix device list page (`apps/web/src/app/(app)/devices/page.tsx`):
-- `canDeliver` users should see `shipped` status devices in the list
-- Line 124: `selectableIds` for `canAssign` should ALSO include `shipped` for company_admin
-
-### Verification
-1. Vendor admin ships a device → status = shipped, owner = target company
-2. Company admin opens device detail → sees "确认收货" button
-3. Click → API call → status becomes `delivered`
-4. Company admin opens device list → sees `shipped` devices in list → can batch deliver too
+`apps/web/src/app/(app)/devices/page.tsx`:
+- `selectedDeliverable` filter already uses `shipped`
+- Confirm company_admin can select/deliver shipped devices
+- Fix line 124: `selectableIds` for `canDeliver` role must include `shipped`
 
 ---
 
 ## Task 3 [P1]: Device Assigning — "分配授权" in Detail Page
 
 ### Problem
-After `delivered`, company admin needs to assign device to team/member to trigger `assigned` status. No such button in device detail page.
+After `delivered`, company admin needs to assign device to trigger `assigned` status.
 
 ### Fix
 `apps/web/src/app/(app)/devices/[id]/page.tsx`:
-When `d.status === 'delivered'` AND current user is company_admin, show "分配授权" button.
-- Button: `<UsersRound size={14} /> 分配授权`
-- Opens AssignDialog (reuse existing `AssignDialog` component from device list page)
-- On assign: refetch → status becomes `assigned`, shows current assignment info
-
-### Verification
-1. Device status = delivered → detail page shows "分配授权" button
-2. Click → assign to team or user → status = assigned
-3. Detail page now shows "当前授权" section with assigned user/team
+- When `status === 'delivered'` AND user is company_admin: show "分配授权" button
+- Reuse existing AssignDialog component → assign to team or user → status becomes `assigned`
+- Show current assignment info block after assign
 
 ---
 
-## Task 4 [P1]: RemoteControl Prompt — Fix Model-Specific Message
+## Task 4 [P1]: RemoteControl Prompt — Model-Specific
 
 ### Problem
-4G lock (82730754, model 4GPAD-SEC-01) shows:  
-`"设备需在 assigned/active 状态且为 LoRa 型号才能远程控制"`  
-This is wrong — the device is 4G, not LoRa.
+4G lock shows `"需在 assigned/active 状态且为 LoRa 型号才能远程控制"` — wrong, it's 4G not LoRa.
 
 ### Fix
 `apps/web/src/components/RemoteControl.tsx`:
 ```tsx
-const protocolLabel = device.model?.hasLora ? 'LoRa 型号' : 
-                      device.model?.has4g ? '4G 联网' : '门锁';
-
-{isControllable
-  ? `指令通过 ${protocolLabel === 'LoRa 型号' ? 'LoRa 网关' : '4G 网络'}下发`
-  : `设备需在 assigned/active 状态且为${protocolLabel}才能远程控制`}
+const protocol = device.model?.hasLora ? 'LoRa 型号' : '4G 联网';
+// Use in both enabled and disabled messages
 ```
-
-### Verification
-1. 4G lock shipped → prompt: "需在 assigned/active 状态且为4G联网才能远程控制"
-2. LoRa lock shipped → prompt: "需在 assigned/active 状态且为LoRa型号才能远程控制"
+- Enabled: `指令通过 {LoRa网关/4G网络}下发`
+- Disabled: `设备需在 assigned/active 状态且为{4G联网/LoRa型号}才能远程控制`
 
 ---
 
-## Task 5 [P2]: Company Detail Page — Device Card
+## Task 5 [P0]: Sidebar — Customer Company Menu Restructure
 
 ### Problem
-`/companies/[id]` shows only org structure + personnel list. No device list. Vendor admin viewing a company cannot see what devices that company has.
+- `对接API` and `固件OTA` shouldn't be visible to company_admin
+- No "维修中库" for customer companies
+- No "使用中库" concept for customer companies
+
+### Fix — Sidebar
+`apps/web/src/components/Sidebar.tsx`:
+
+1. **Remove from company_admin:**
+   - `对接API`: change roles from `['vendor_admin', 'company_admin']` → `['vendor_admin']`
+   - `固件OTA`: change roles from `['vendor_admin', 'company_admin']` → `['vendor_admin']`
+
+2. **Add to "运维功能" group:**
+   - `使用中库` URL: `/devices?status=active,assigned,delivered,shipped`  
+     roles: `['company_admin', 'dept_admin', 'team_leader']`
+
+3. **Add "维修管理" section for company_admin:**
+   - New group between "运维功能" and "管理设置":
+   ```tsx
+   {
+     groupId: 'repair-mgmt',
+     groupLabel: '🔧 维修管理',
+     groupRoles: ['company_admin', 'dept_admin', 'team_leader'],
+     items: [
+       {
+         href: '/repairs',
+         label: '维修中库',
+         icon: Wrench,
+         roles: ['company_admin', 'dept_admin', 'team_leader'],
+       },
+     ],
+   },
+   ```
+   - REPLACE the existing `repairs` entry that's under `vendor` group
+
+4. **Vendor 维修中库:** Keep in vendor group, but make it show ALL companies' repairs
+
+### Sidebar Result
+
+**子账号 (company_admin):**
+```
+🔧 运维功能
+├── 设备（概览）
+├── 使用中库
+├── 设备管理
+├── 授权管理
+├── 权限审批
+├── 临开审批
+├── 告警
+🔧 维修管理
+├── 维修中库
+管理员工具
+├── 人员
+├── 操作日志
+```
+
+**总账户 (vendor_admin):** unchanged + sees all repairs
+
+---
+
+## Task 6 [P1]: Customer Repair Request Flow
+
+### Problem
+No way for customer to initiate a repair. Repair intake (`POST /devices/:id/repair-intake`) exists but no frontend entry point for company users.
+
+### Database
+`device_repair` table already has all needed fields. Add one:
+- `fault_category_id` BIGINT (nullable, FK to new fault_category table)
+
+### New Table: `fault_category`
+```sql
+CREATE TABLE fault_category (
+  id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+  label VARCHAR(128) NOT NULL,        -- e.g. "无法充电"
+  display_order INT NOT NULL DEFAULT 0,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+Seed data — common faults (鸿哥 to provide final list):
+```
+1. 无法开锁
+2. 无法关锁  
+3. 电池不充电
+4. 蓝牙连接失败
+5. 4G 信号弱/离线
+6. GPS 定位不准
+7. 锁体损坏
+8. 其他
+```
+
+### Fix — API
+`apps/api/src/routes/repairs.ts`:
+
+1. **POST /devices/:id/repair-intake** — extend to accept `faultCategoryId` and `notes`:
+   ```ts
+   body: {
+     faultCategoryId?: number,
+     notes?: string,
+   }
+   ```
+
+2. **GET /fault-categories** — list active fault categories (all roles)
+
+3. **GET /repairs** — company_admin scope: only show repairs from their company
+
+### Fix — Web
+
+1. **"报修" button in device detail page:**
+   `apps/web/src/app/(app)/devices/[id]/page.tsx`:
+   - When user is company_admin and device belongs to their company: show "报修" button
+   - Opens RepairRequestDialog
+
+2. **RepairRequestDialog component (new):**
+   `apps/web/src/components/RepairRequestDialog.tsx`:
+   - Dropdown: fault category (from GET /fault-categories)
+   - Textarea: notes (optional)
+   - Submit: `POST /devices/:id/repair-intake`
+   - On success: device status → `repairing`, closes dialog
+
+3. **维修中库 page:** Update to filter by company for company_admin
+   - Vendor: sees ALL repairs
+   - Company admin: sees only own company's repairs
+
+### Repair Flow (End to End)
+```
+客户侧：
+1. 设备详情页 → 点"报修"
+2. 选故障类型(下拉勾选) → 填备注 → 提交
+3. 设备自动入"维修中库"（客户可见）
+4. 客户寄回锁
+
+总账户侧：
+5. 维修中库看到新维修单 → 点"确认收到" → 状态变 diagnosing
+6. 维修 → 状态更新 → repaired
+7. 修好后自动移回待移交区 → 重新发货给客户
+```
+
+---
+
+## Task 7 [P2]: Company Detail Page — Device Card
 
 ### Fix
 `apps/web/src/app/(app)/companies/[id]/page.tsx`:
-Add a third section card at bottom: "设备清单"
-- Query: `GET /api/v1/devices?ownerCompanyId={id}` (filtered by company)
-- Show table: lock_id, ble_mac, model, status (badge), last_seen_at
-- Link each row to `/devices/{id}`
-- If user is company_admin → show "确认收货" button on shipped devices
-
-### Verification
-1. Vendor admin opens company → sees "设备清单" table
-2. Shows all devices owned by that company with status badges
-3. Company admin opens own company page → same table visible
+- Add "设备清单" card at bottom
+- Query `GET /api/v1/devices?ownerCompanyId={id}`
+- Table: lock_id, model, status (badge), last_seen_at
+- Link rows to `/devices/{id}`
 
 ---
 
-## Task 6 [P2]: Device List Filter — company_admin Sees shipped
+## Summary
 
-### Fix (partial, overlap with Task 2)
-`apps/web/src/app/(app)/devices/page.tsx`:
-- `selectableIds` for `canDeliver` role: also include `shipped`
-- `selectedDeliverable` filter already uses `shipped` — confirm it works after filter fix
-
----
+| # | Priority | What | Where |
+|---|----------|------|-------|
+| 1 | P0 | Edit user (role/name/status) | schema + api + users page |
+| 2 | P0 | "确认收货" in device detail | devices/[id] + devices list |
+| 3 | P1 | "分配授权" in device detail | devices/[id] |
+| 4 | P1 | RemoteControl model-specific prompt | RemoteControl.tsx |
+| 5 | P0 | Sidebar restructure + repair entry | Sidebar.tsx |
+| 6 | P1 | Customer repair flow | repairs API + device detail + new component |
+| 7 | P2 | Company detail device card | companies/[id] |
 
 ## Notes
-
-- Tasks 1-4 are ready to implement immediately. Tasks 5-6 are smaller follow-ons.
-- Task 1's schema change requires DB migration? No — just adding `role` to zod schema + API write.
-- All API endpoints mentioned already exist; this is purely frontend + schema work.
-- The `AssignDialog` component should already exist in the web codebase (used in device list page).
+- Task 1: `UpdateUserSchema` role enum should NOT include vendor_admin or production_operator (company_admin can't assign those)
+- Task 5-6: Sidebar "维修中库" already exists at `/repairs` for vendor; need to scope by company for company_admin
+- `device_repair` table already has all status flow fields (intake→diagnosing→repairing→repaired)
+- No DB migration needed for tasks 1-5, only Task 6 adds fault_category table
