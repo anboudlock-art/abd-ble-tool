@@ -1,88 +1,82 @@
-# v2.8 锁信息自动填充 Spec（基于协议文档）
+# v2.8 设备详情页 + 日志查看 Spec
 
-> 依据: `docs/4gble093_protocol_for_claude.md`
-> 当前固件版本: V10.0 源代码
-
----
-
-## 问题列表（对照协议文档）
-
-### 1. 登录帧 (Sub=0x01) — 匹配逻辑
-**协议: Payload [14-19]=BLE MAC, [20-23]=Server IP, [24-25]=Port**
-- ❌ 当前只按 `ble_mac` 匹配，锁上报 `00:00:00:00:00:00` 时直接拒
-- ✅ 改成两级回退: `lock_id`(frame.lockSN) → `ble_mac` → 拒
-- ✅ SN 匹配但 MAC 不同时，自动更新 ble_mac 字段
-
-### 2. 心跳帧 (Sub=0x06) — 固件版本
-**协议: Payload=固件版本号字符串 (soft_ver)，如 "V10.0 HW1.2"**
-- ✅ handleHeartbeat 已有解析: `frame.payload.toString('ascii').replace(/\0+$/, '')`
-- ❌ 但 82730804 的 device.firmware_version 还是 null — 说明心跳没触发更新，或存储的是 raw payload 而不是版本号
-
-### 3. GPS 帧 (Sub=0x0A) — 坐标 + 电池
-**协议: [0-3]=时间戳, [4-7]=纬度BCD, [8-11]=经度BCD, [12]=速度, [13]=方向标志, [14+]=锁状态+电池**
-- ⚠️ 电池取 [16] 是猜测值，需与协议对照确认 [14] 具体布局
-- ❌ 82730804 无 GPS 事件 — 可能室内无定位（正常），需用有信号的锁验证
-
-### 4. 事件帧 (Sub=0x2D) — 锁状态
-**协议: [0]=0x2A, [1]=0x55, [2]=Cmd(0x80/0xA0/0x62), [3-6]=LockID, [7]=Gate, [8]=电池, [9]=锁状态(0x50关/0x30开)**
-- ⚠️ handleEvent 电池取 [8] 是正确的，验证通过
-- ✅ 锁状态解析 [9] 正确
-- ❌ 锁未上报过 EVENT — 设备 last_state 始终 unknown
-
-### 5. ACK 帧 (Sub=0x16) — 回执
-**协议: [0]=0x2D, [1-2]=report_Serial**
-- ⚠️ 当前从 payload[1] 读 UInt16LE，但协议说 [0] 是 0x2D — 是否正确需要验证
-- 信息: 锁回执表示收到了服务器指令，但不包含锁状态变化
-
-### 6. 设备详情页显示
-- ❌ 后台只显示了几个基础字段（SN, MAC, 状态, 电池0%）
-- ✅ 需要增显: IMEI, FW版本, ICCID, GPS坐标, 锁状态(开/关), 最后在线时间
+> 依据: 老平台截图(开关锁日志列表) + 协议手册260225 + 82730804实测
+> 分支: claude/smart-lock-web-platform-SUvdF
 
 ---
 
-## 需要的精确改动
+## 一、设备详情页字段增强
 
-### handlers.ts — handleLogin
-```
-1. 匹配逻辑改 SN 优先:
-   - let device = await prisma.device.findUnique({ where: { lockId: String(frame.lockSN) } });
-   - if (!device) device = await prisma.device.findUnique({ where: { bleMac: mac } });
-   - 匹配后如果 ble_mac 与上报不同，更新 ble_mac 和 lastSeenAt
-```
+**现状**: 只显示 SN, MAC, 状态(unknown), 电池(0%)  
+**老平台**: 显示完整字段（IMEI/固件版本/ICCID/4G MAC/电池18%/锁状态等）
 
-### handlers.ts — handleHeartbeat
-```
-1. 确认 firmwareVersion 更新正确存储
-2. 同时额外记录 lockEvent(type='heartbeat', source='fourg') 到数据库（当前无）
-```
+**需求 — GET /api/v1/devices/:id 返回字段增加:**
+| 字段 | 存储位置 | 来源 |
+|------|----------|------|
+| imei | device.imei | 手动录入 / 0x33 |
+| iccid | device.iccid | login IMSI后15位 / 手动录入 |
+| firmware_version | device.firmware_version | 心跳 / 手动录入 |
+| fourg_mac | device.fourg_mac | 手动录入 |
+| last_battery | device.last_battery | GPS A2 / 电锁响应 |
+| location_lat/lng | device.location_lat/lng | GPS |
+| last_state | device.last_state | GPS A3 / 电锁响应 |
+| last_seen_at | device.last_seen_at | login/心跳 |
 
-### handlers.ts — handleGps
+**锁状态中文映射**:
 ```
-1. 确认 [14] 起的具体布局：电池到底在哪个偏移？
-2. 存储 location_lat/lng + lastBattery
-```
-
-### handlers.ts — handleLogin 增加
-```
-1. 登录成功后初始化 last_state = 'closed'（默认关锁状态）
-2. lockEvent 记录 online 事件（已有）
-```
-
-### 前端设备详情页
-```
-显示字段: SN, BLE MAC, IMEI, FW版本, ICCID, GPS坐标, 锁状态(开/关), 电池, 最后在线
+opened → 开锁
+half_locked → 假锁(未施封)
+sealed → 施封态
+locked → 锁定态
+unsealed → 解封态
+cut_alarm → 剪断报警
+unknown → 未知
 ```
 
 ---
 
-## 不改的范围
-- 固件不能改（鸿哥要求）
-- 下行指令格式已按协议实现（CMD 0x81 开锁），当前可用
-- login payload 只有 26 字节有效内容（[0-13]GPS + [14-19]MAC + [20-23]IP + [24-25]Port）
+## 二、设备日志查看功能（老平台对标）
+
+**老平台**: 有"开关锁日志列表"，显示业务数据流（上下行、事件类型、时间、GPS信息）
+
+**新平台需求**:
+1. 设备详情页底部或独立 tab — **lock_event 列表**
+2. 每条显示: 事件类型图标、业务描述、时间、GPS坐标(如有)
+3. 事件类型格式化:
+   - `online` → 🟢 设备上线
+   - `offline` → 🔴 设备离线
+   - `heartbeat` → 💓 心跳
+   - `gps` → 📍 GPS: 纬度,经度
+   - `event` → 🔧 锁事件: 施封/解封/开锁/关锁
+   - `ack` → ✅ 指令回执
+   - `command` → ⬇️ 下发指令
+
+**API**: 复用 `GET /api/v1/devices/:id/events` 或已有路由
+
+**UI**: 在设备详情页增加"事件日志"tab，分页加载，最新在前
 
 ---
 
-## 改动文件
-- `apps/gw-server/src/lock-tcp/handlers.ts`
-- `apps/gw-server/src/lock-tcp/server.ts`（如有需要）
-- `apps/web/src/components/DeviceDetail.tsx`（或对应设备详情页）
+## 三、设备 MAC/IMEI/ICCID 手动录入
+
+**现状**: `PUT /api/v1/devices/:id` 支持编辑这些字段，但 schema 限制 ICCID 为纯数字
+
+**需求**:
+1. `packages/shared/src/schemas.ts` 放宽 ICCID: `z.string().max(20)` (允许字母数字)
+2. 前端设备详情页增加编辑按钮，可编辑: BLE MAC, IMEI, ICCID, FW版本, 4G MAC
+3. 编辑保存后刷新页面
+
+---
+
+## 四、文件范围
+- `apps/web/src/app/(app)/devices/[id]/page.tsx` — 设备详情页改造
+- `apps/web/src/components/DeviceDetail.tsx` — 如有独立组件
+- `apps/web/src/components/DeviceEventLog.tsx` — 新增事件日志组件
+- `apps/api/src/routes/devices.ts` — 确认 GET /devices/:id 返回字段
+- `packages/shared/src/schemas.ts` — ICCID schema
+
+---
+
+## 五、不改
+- 数据库表结构（字段已存在）
+- 设备其他生命周期流程
