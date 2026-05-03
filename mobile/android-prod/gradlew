@@ -1,0 +1,31 @@
+#!/bin/sh
+#
+# Minimal Gradle Wrapper bootstrap for ABDProduction.
+# Downloads (on first use) the gradle distribution declared in
+# gradle/wrapper/gradle-wrapper.properties and delegates to it.
+
+set -e
+
+DIR="$(cd "$(dirname "$0")" && pwd)"
+WRAPPER_JAR="$DIR/gradle/wrapper/gradle-wrapper.jar"
+
+if [ ! -f "$WRAPPER_JAR" ]; then
+  echo "ERROR: $WRAPPER_JAR is missing." >&2
+  exit 1
+fi
+
+if [ -z "$JAVA_HOME" ]; then
+  if command -v java >/dev/null 2>&1; then
+    JAVACMD="java"
+  else
+    echo "ERROR: JAVA_HOME is not set and 'java' is not on PATH." >&2
+    exit 1
+  fi
+else
+  JAVACMD="$JAVA_HOME/bin/java"
+fi
+
+exec "$JAVACMD" \
+  -Xmx64m -Xms64m \
+  -classpath "$WRAPPER_JAR" \
+  org.gradle.wrapper.GradleWrapperMain "$@"

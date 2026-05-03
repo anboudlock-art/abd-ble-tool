@@ -1,0 +1,37 @@
+{
+  "name": "abd-ble-tool",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Anboud LoRa-BLE Smart Lock Platform - monorepo",
+  "packageManager": "pnpm@10.0.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "db:generate": "pnpm --filter @abd/db exec prisma generate",
+    "db:migrate:dev": "pnpm --filter @abd/db exec prisma migrate dev",
+    "db:migrate:deploy": "pnpm --filter @abd/db exec prisma migrate deploy",
+    "db:studio": "pnpm --filter @abd/db exec prisma studio",
+    "format": "prettier --write \"**/*.{ts,tsx,md,json}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "turbo": "^2.3.0",
+    "typescript": "^5.6.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "esbuild",
+      "prisma",
+      "sharp"
+    ]
+  }
+}

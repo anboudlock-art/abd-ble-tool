@@ -1,0 +1,26 @@
+{
+  "name": "@abd/proto",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./lock-tcp": { "types": "./dist/lock-tcp/index.d.ts", "import": "./dist/lock-tcp/index.js" },
+    "./lora": { "types": "./dist/lora/index.d.ts", "import": "./dist/lora/index.js" },
+    "./ble": { "types": "./dist/ble/index.d.ts", "import": "./dist/ble/index.js" },
+    "./gateway": { "types": "./dist/gateway/index.d.ts", "import": "./dist/gateway/index.js" }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test src/**/*.test.ts",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}
