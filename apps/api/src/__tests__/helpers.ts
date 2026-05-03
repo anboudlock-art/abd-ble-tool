@@ -22,6 +22,7 @@ export async function resetDb(): Promise<void> {
       device_firmware_task,
       firmware_package,
       device_repair,
+      fault_category,
       device_command,
       lock_event,
       device_deployment,

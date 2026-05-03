@@ -4,7 +4,7 @@ import { use, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, MapPin, Pencil, ShieldOff, Trash2, Wrench } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, KeyRound, MapPin, PackageCheck, Pencil, ShieldOff, Trash2, Wrench } from 'lucide-react';
 import {
   apiRequest,
   ApiClientError,
@@ -15,11 +15,13 @@ import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Table, THead, TBody, Tr, Th, Td, EmptyState } from '@/components/ui/Table';
 import { Badge, deviceStatusLabel, deviceStatusTone } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { AssignDialog } from '@/components/AssignDialog';
 import { RemoteControl } from '@/components/RemoteControl';
 import { EditDeviceDialog } from '@/components/EditDeviceDialog';
 import { DeployDialog } from '@/components/DeployDialog';
 import { DeviceEventLog } from '@/components/DeviceEventLog';
 import { RepairIntakeDialog } from '@/components/RepairIntakeDialog';
+import { RepairRequestDialog } from '@/components/RepairRequestDialog';
 import { DeviceMap } from '@/components/DeviceMap';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -49,8 +51,11 @@ export default function DeviceDetailPage({
   const [showEdit, setShowEdit] = useState(false);
   const [showDeploy, setShowDeploy] = useState(false);
   const [showRepair, setShowRepair] = useState(false);
+  const [showAssign, setShowAssign] = useState(false);
+  const [showRepairRequest, setShowRepairRequest] = useState(false);
   const isVendor = me?.role === 'vendor_admin';
-  const canEdit = isVendor || me?.role === 'company_admin';
+  const isCompanyAdmin = me?.role === 'company_admin';
+  const canEdit = isVendor || isCompanyAdmin;
 
   const deviceQ = useQuery({
     queryKey: ['device', id],
@@ -78,6 +83,23 @@ export default function DeviceDetailPage({
     },
     onError: (e) =>
       alert(e instanceof ApiClientError ? e.body.message : '撤销失败'),
+  });
+
+  // v2.8.1 Task 2: 确认收货 — single-device wrapper around the
+  // existing batch /devices/deliver endpoint so the customer can
+  // accept a shipped device straight from its detail page.
+  const deliver = useMutation({
+    mutationFn: () =>
+      apiRequest('/api/v1/devices/deliver', {
+        method: 'POST',
+        body: { deviceIds: [Number(id)] },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['device', id] });
+      qc.invalidateQueries({ queryKey: ['devices'] });
+    },
+    onError: (e) =>
+      alert(e instanceof ApiClientError ? e.body.message : '确认收货失败'),
   });
 
   if (deviceQ.isLoading) {
@@ -117,13 +139,49 @@ export default function DeviceDetailPage({
           action={
             canEdit ? (
               <div className="flex gap-2">
+                {/* v2.8.1 Task 2: customer accepts a shipped device. */}
+                {d.status === 'shipped' &&
+                isCompanyAdmin &&
+                d.ownerCompanyId === me?.companyId ? (
+                  <Button
+                    loading={deliver.isPending}
+                    onClick={() => {
+                      if (
+                        confirm(`确认收货 ${d.lockId}？收货后状态变为「已签收」。`)
+                      ) {
+                        deliver.mutate();
+                      }
+                    }}
+                  >
+                    <PackageCheck size={14} /> 确认收货
+                  </Button>
+                ) : null}
+                {/* v2.8.1 Task 3: company admin assigns a delivered device. */}
+                {d.status === 'delivered' && isCompanyAdmin ? (
+                  <Button onClick={() => setShowAssign(true)}>
+                    <KeyRound size={14} /> 分配授权
+                  </Button>
+                ) : null}
+                {/* v2.8.1 Task 6: company users open a repair ticket. */}
+                {d.status !== 'repairing' &&
+                d.status !== 'retired' &&
+                d.status !== 'manufactured' &&
+                !isVendor &&
+                d.ownerCompanyId === me?.companyId ? (
+                  <Button
+                    variant="secondary"
+                    onClick={() => setShowRepairRequest(true)}
+                  >
+                    <AlertTriangle size={14} /> 报修
+                  </Button>
+                ) : null}
                 {(d.status === 'assigned' || d.status === 'active') ? (
                   <Button variant="secondary" onClick={() => setShowDeploy(true)}>
                     <MapPin size={14} />{' '}
                     {d.status === 'active' ? '更新部署位置' : '现场部署'}
                   </Button>
                 ) : null}
-                {d.status !== 'repairing' && d.status !== 'retired' ? (
+                {d.status !== 'repairing' && d.status !== 'retired' && isVendor ? (
                   <Button variant="secondary" onClick={() => setShowRepair(true)}>
                     <Wrench size={14} /> 退修
                   </Button>
@@ -258,6 +316,28 @@ export default function DeviceDetailPage({
           lockId={d.lockId}
           onClose={() => setShowRepair(false)}
           onIntake={() => setShowRepair(false)}
+        />
+      ) : null}
+
+      {showAssign ? (
+        <AssignDialog
+          selectedDeviceIds={[d.id]}
+          fixedCompanyId={d.ownerCompanyId ?? undefined}
+          onClose={() => setShowAssign(false)}
+          onAssigned={() => {
+            qc.invalidateQueries({ queryKey: ['device', id] });
+            qc.invalidateQueries({ queryKey: ['device', id, 'assignment'] });
+            setShowAssign(false);
+          }}
+        />
+      ) : null}
+
+      {showRepairRequest ? (
+        <RepairRequestDialog
+          deviceId={d.id}
+          lockId={d.lockId}
+          onClose={() => setShowRepairRequest(false)}
+          onSubmitted={() => setShowRepairRequest(false)}
         />
       ) : null}
 

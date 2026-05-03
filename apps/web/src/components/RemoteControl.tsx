@@ -75,14 +75,26 @@ export function RemoteControl({ device }: Props) {
       setError(err instanceof ApiClientError ? err.body.message : '下发失败'),
   });
 
+  // v2.8.1: prompt text picks "LoRa 网关" or "4G 联网" by what the
+  // model actually carries. eseal (BLE only) gets a clearer message
+  // pointing the operator to the BLE flow on the APP.
+  const transport = device.model?.hasLora
+    ? 'LoRa 网关'
+    : device.model?.has4g
+      ? '4G 联网'
+      : 'BLE 直连';
+  const remoteCapable = !!(device.model?.hasLora || device.model?.has4g);
+
   return (
     <Card>
       <CardHeader
         title="远程控制"
         description={
           isControllable
-            ? '指令通过 LoRa 网关下发，10 秒内未收到状态变化视为超时'
-            : '设备需在 assigned/active 状态且为 LoRa 型号才能远程控制'
+            ? `指令通过 ${transport} 下发，10 秒内未收到状态变化视为超时`
+            : remoteCapable
+              ? `设备需在 assigned/active 状态且通过 ${transport} 才能远程控制`
+              : 'BLE-only 型号不支持后台远程开锁，请到 APP 端连接锁后操作'
         }
       />
       <CardBody className="space-y-4">

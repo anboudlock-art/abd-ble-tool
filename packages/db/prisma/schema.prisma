@@ -925,6 +925,22 @@ enum RepairStatus {
   returned
 }
 
+/// v2.8.1 — pre-defined fault categories for the customer 报修 form.
+/// Vendor admin curates the list (display_order, is_active) so the
+/// dropdown stays tidy and consistent across customers.
+model FaultCategory {
+  id           BigInt   @id @default(autoincrement())
+  label        String   @db.VarChar(128)
+  displayOrder Int      @default(0) @map("display_order")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  repairs      DeviceRepair[]
+
+  @@index([isActive, displayOrder])
+  @@map("fault_category")
+}
+
 /// One row per (device, intake event). Created when a device is moved into
 /// the repair pool, closed when it's repaired and ready to ship back.
 model DeviceRepair {
@@ -937,6 +953,9 @@ model DeviceRepair {
   /// restore it on close-out.
   priorStatus        DeviceStatus @map("prior_status")
   faultReason        String       @map("fault_reason") @db.VarChar(255)
+  /// v2.8.1: structured fault tag from FaultCategory; faultReason is
+  /// kept as the free-form notes field so legacy intakes don't lose data.
+  faultCategoryId    BigInt?      @map("fault_category_id")
   status             RepairStatus @default(intake)
   intakeByUserId     BigInt?      @map("intake_by_user_id")
   repairedByUserId   BigInt?      @map("repaired_by_user_id")
@@ -948,10 +967,12 @@ model DeviceRepair {
 
   device             Device       @relation(fields: [deviceId], references: [id])
   sourceCompany      Company?     @relation("RepairSourceCompany", fields: [sourceCompanyId], references: [id])
+  faultCategory      FaultCategory? @relation(fields: [faultCategoryId], references: [id])
 
   @@index([deviceId, intakeAt(sort: Desc)])
   @@index([status])
   @@index([sourceCompanyId])
+  @@index([faultCategoryId])
   @@map("device_repair")
 }
 

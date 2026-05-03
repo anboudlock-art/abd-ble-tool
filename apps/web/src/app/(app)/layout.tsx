@@ -32,8 +32,9 @@ const ROUTE_ROLES: Record<string, readonly string[] | null> = {
   '/ble-debug': ['vendor_admin', 'production_operator'],
   '/companies': ['vendor_admin'],
   '/users': ['vendor_admin', 'company_admin', 'dept_admin', 'team_leader'],
-  '/integrations': ['vendor_admin', 'company_admin'],
-  '/firmware': ['vendor_admin', 'company_admin'],
+  // v2.8.1: integrations + firmware OTA are vendor-only platform tools.
+  '/integrations': ['vendor_admin'],
+  '/firmware': ['vendor_admin'],
   '/audit-logs': ['vendor_admin', 'company_admin'],
   '/permission-approvals': ['vendor_admin', 'company_admin', 'dept_admin'],
   '/temporary-approvals': [

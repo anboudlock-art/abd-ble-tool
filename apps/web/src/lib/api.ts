@@ -274,7 +274,24 @@ export interface Device {
   lockId: string;
   bleMac: string;
   imei: string | null;
-  model: { id: string; code: string; name: string } | null;
+  // v2.8 batch 1 surface added these fields server-side; expose them
+  // to consumers (RemoteControl, /devices/manage table, the APP via
+  // /users/me/devices) so they can render per-capability buttons.
+  model:
+    | {
+        id: string;
+        code: string;
+        name: string;
+        category?: string | null;
+        hasBle?: boolean | null;
+        has4g?: boolean | null;
+        hasGps?: boolean | null;
+        hasLora?: boolean | null;
+        capabilitiesJson?: unknown;
+      }
+    | null;
+  gatewayId?: string | null;
+  gatewayOnline?: boolean | null;
   firmwareVersion: string | null;
   hardwareVersion: string | null;
   qcStatus: string;

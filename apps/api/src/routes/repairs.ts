@@ -34,7 +34,17 @@ export default async function repairRoutes(app: FastifyInstance) {
     {
       onRequest: [
         app.authenticate,
-        requireRole('vendor_admin', 'company_admin', 'production_operator'),
+        // v2.8.1: company_admin/dept_admin/team_leader/member of the
+        // device's company can submit a 报修. Production_operator
+        // and vendor_admin keep their existing access.
+        requireRole(
+          'vendor_admin',
+          'company_admin',
+          'dept_admin',
+          'team_leader',
+          'member',
+          'production_operator',
+        ),
       ],
       schema: {
         params: z.object({ id: z.coerce.number().int().positive() }),
@@ -47,14 +57,17 @@ export default async function repairRoutes(app: FastifyInstance) {
       const device = await prisma.device.findUnique({ where: { id } });
       if (!device || device.deletedAt) throw ApiError.notFound();
 
-      // Company admins can only repair-intake their own devices.
-      if (ctx.role === 'company_admin' && device.ownerCompanyId !== ctx.companyId) {
+      // Anyone in the device's company can intake (vendor sees all).
+      if (
+        ctx.role !== 'vendor_admin' &&
+        ctx.role !== 'production_operator' &&
+        device.ownerCompanyId !== ctx.companyId
+      ) {
         throw ApiError.forbidden();
       }
       if (device.status === 'repairing') {
         throw ApiError.conflict('Device is already in repair');
       }
-      // Validate the transition into repairing.
       assertTransition(device.status, 'repairing');
 
       const sourceCompanyId =
@@ -62,13 +75,33 @@ export default async function repairRoutes(app: FastifyInstance) {
           ? BigInt(req.body.sourceCompanyId)
           : device.ownerCompanyId;
 
+      // Resolve the canonical faultReason: prefer FaultCategory.label
+      // when faultCategoryId is supplied; otherwise the free-form
+      // body.faultReason. At least one must be present.
+      let faultReason = req.body.faultReason ?? null;
+      let faultCategoryId: bigint | null = null;
+      if (req.body.faultCategoryId !== undefined) {
+        const cat = await prisma.faultCategory.findUnique({
+          where: { id: BigInt(req.body.faultCategoryId) },
+        });
+        if (!cat || !cat.isActive) {
+          throw ApiError.conflict('faultCategoryId not found or inactive');
+        }
+        faultCategoryId = cat.id;
+        if (!faultReason) faultReason = cat.label;
+      }
+      if (!faultReason) {
+        throw ApiError.badRequest('faultReason or faultCategoryId required');
+      }
+
       const result = await prisma.$transaction(async (tx) => {
         const repair = await tx.deviceRepair.create({
           data: {
             deviceId: device.id,
             sourceCompanyId,
             priorStatus: device.status,
-            faultReason: req.body.faultReason,
+            faultReason: faultReason!,
+            faultCategoryId,
             notes: req.body.notes,
             intakeByUserId: ctx.userId,
           },
@@ -86,7 +119,10 @@ export default async function repairRoutes(app: FastifyInstance) {
             reason: 'repair-intake',
             metadata: {
               repairId: repair.id.toString(),
-              fault: req.body.faultReason.slice(0, 80),
+              fault: faultReason!.slice(0, 80),
+              ...(faultCategoryId
+                ? { faultCategoryId: faultCategoryId.toString() }
+                : {}),
             },
           },
         });
@@ -94,6 +130,31 @@ export default async function repairRoutes(app: FastifyInstance) {
       });
       reply.code(201);
       return serialize(result);
+    },
+  );
+
+  // -------------------- fault categories --------------------
+
+  /**
+   * v2.8.1: list active fault categories for the customer 报修 dropdown.
+   * Open to any authenticated user. Vendor admin can curate the list
+   * via DB / future admin UI; we don't expose mutation endpoints yet.
+   */
+  typed.get(
+    '/fault-categories',
+    { onRequest: [app.authenticate] },
+    async () => {
+      const items = await prisma.faultCategory.findMany({
+        where: { isActive: true },
+        orderBy: [{ displayOrder: 'asc' }, { id: 'asc' }],
+      });
+      return {
+        items: items.map((c) => ({
+          id: c.id.toString(),
+          label: c.label,
+          displayOrder: c.displayOrder,
+        })),
+      };
     },
   );
 
@@ -207,13 +268,20 @@ export default async function repairRoutes(app: FastifyInstance) {
       const ctx = getAuthContext(req);
       const sc = scopeToCompany(ctx);
       const { page, pageSize, status, sourceCompanyId } = req.query;
+      // Non-vendor callers are always pinned to their own scope; the
+      // sourceCompanyId query param is a vendor-only convenience.
+      // Without this guard a company_admin could pass another company's
+      // id and read their repairs (P0 leak).
+      const effectiveSourceCompanyId: bigint | undefined = sc.companyId
+        ? sc.companyId
+        : sourceCompanyId
+          ? BigInt(sourceCompanyId)
+          : undefined;
       const where: Prisma.DeviceRepairWhereInput = {
         ...(status ? { status } : {}),
-        ...(sourceCompanyId
-          ? { sourceCompanyId: BigInt(sourceCompanyId) }
-          : sc.companyId
-            ? { sourceCompanyId: sc.companyId }
-            : {}),
+        ...(effectiveSourceCompanyId
+          ? { sourceCompanyId: effectiveSourceCompanyId }
+          : {}),
       };
       const [items, total] = await Promise.all([
         prisma.deviceRepair.findMany({

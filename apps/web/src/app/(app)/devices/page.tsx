@@ -117,14 +117,23 @@ export default function DevicesPage() {
 
   // Selection rules differ by role:
   //   vendor_admin: in_warehouse devices (for shipping)
-  //   company_admin / dept_admin: delivered devices (for assigning)
+  //   company_admin / dept_admin: shipped (确认收货) + delivered (assign)
+  //                               + assigned (re-assign) — anything they
+  //                               can act on in bulk from this page.
   const selectableIds = useMemo(() => {
     const items = data?.items ?? [];
     if (isVendor) return items.filter((d) => d.status === 'in_warehouse').map((d) => d.id);
-    if (canAssign)
-      return items.filter((d) => d.status === 'delivered' || d.status === 'assigned').map((d) => d.id);
+    if (canAssign || canDeliver)
+      return items
+        .filter(
+          (d) =>
+            d.status === 'shipped' ||
+            d.status === 'delivered' ||
+            d.status === 'assigned',
+        )
+        .map((d) => d.id);
     return [];
-  }, [data, isVendor, canAssign]);
+  }, [data, isVendor, canAssign, canDeliver]);
 
   const selectedShippable = useMemo(
     () =>

@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Copy, KeyRound, Plus, Trash2, X } from 'lucide-react';
+import { Copy, KeyRound, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { apiRequest, ApiClientError, type UserListResp } from '@/lib/api';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { Table, THead, TBody, Tr, Th, Td, EmptyState } from '@/components/ui/Table';
@@ -25,9 +25,14 @@ export default function UsersPage() {
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const [resetReveal, setResetReveal] = useState<{ name: string; phone: string; tempPassword: string } | null>(null);
+  // v2.8.1 Task 1: edit-user modal state. Holds the row being edited
+  // (or null when closed) so the form pre-fills + the mutation knows
+  // whose id to PUT.
+  const [editing, setEditing] = useState<UserListResp['items'][number] | null>(null);
   const pageSize = 20;
 
   const canManage = me?.role === 'vendor_admin' || me?.role === 'company_admin';
+  const isVendorAdmin = me?.role === 'vendor_admin';
 
   const q = useQuery({
     queryKey: ['users', { page }],
@@ -116,6 +121,13 @@ export default function UsersPage() {
                     <Td>
                       <div className="flex gap-2">
                         <button
+                          title="编辑"
+                          onClick={() => setEditing(u)}
+                          className="text-slate-400 hover:text-slate-700"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
                           title="重置密码"
                           disabled={reset.isPending && reset.variables === u.id}
                           onClick={() => {
@@ -166,6 +178,18 @@ export default function UsersPage() {
         ) : null}
       </Card>
 
+      {editing ? (
+        <EditUserModal
+          user={editing}
+          isVendorAdmin={isVendorAdmin}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            void qc.invalidateQueries({ queryKey: ['users'] });
+            setEditing(null);
+          }}
+        />
+      ) : null}
+
       {resetReveal ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4"
@@ -208,6 +232,144 @@ export default function UsersPage() {
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * v2.8.1 Task 1 — edit user (name / role / status / email).
+ * Phone is NOT editable (it's the login id; reissuing it would
+ * silently move the account). vendor_admin can pick from all
+ * non-platform roles; company_admin can't elevate to vendor_admin
+ * or production_operator (server enforces this too).
+ */
+function EditUserModal({
+  user,
+  isVendorAdmin,
+  onClose,
+  onSaved,
+}: {
+  user: UserListResp['items'][number];
+  isVendorAdmin: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(user.name);
+  const [email, setEmail] = useState(user.email ?? '');
+  const [role, setRole] = useState(user.role);
+  const [status, setStatus] = useState<'active' | 'locked'>(
+    user.status === 'locked' ? 'locked' : 'active',
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  const allowedRoles = isVendorAdmin
+    ? (['vendor_admin', 'company_admin', 'dept_admin', 'team_leader', 'member', 'production_operator'] as const)
+    : (['company_admin', 'dept_admin', 'team_leader', 'member'] as const);
+
+  const save = useMutation({
+    mutationFn: () =>
+      apiRequest(`/api/v1/users/${user.id}`, {
+        method: 'PUT',
+        body: {
+          name,
+          email: email.trim() || null,
+          role,
+          status,
+        },
+      }),
+    onSuccess: onSaved,
+    onError: (e) => setError(e instanceof ApiClientError ? e.body.message : '保存失败'),
+  });
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md rounded-lg bg-white shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+          <h3 className="text-base font-semibold">编辑用户 · {user.phone}</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="space-y-3 px-5 py-4">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-700">姓名</label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={64}
+              className="block w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-700">
+              邮箱 <span className="text-slate-400">(可选)</span>
+            </label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              maxLength={128}
+              className="block w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-700">角色</label>
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+              className="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+            >
+              {allowedRoles.map((r) => (
+                <option key={r} value={r}>
+                  {roleLabel[r] ?? r}
+                </option>
+              ))}
+            </select>
+            {!isVendorAdmin ? (
+              <p className="mt-1 text-xs text-slate-400">
+                公司管理员不能授予厂商级 / 生产员角色
+              </p>
+            ) : null}
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-700">状态</label>
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value as 'active' | 'locked')}
+              className="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+            >
+              <option value="active">正常</option>
+              <option value="locked">禁用 (锁定)</option>
+            </select>
+          </div>
+          {error ? (
+            <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {error}
+            </div>
+          ) : null}
+        </div>
+        <div className="flex justify-end gap-2 border-t border-slate-100 px-5 py-3">
+          <Button variant="ghost" onClick={onClose}>
+            取消
+          </Button>
+          <Button
+            disabled={!name.trim()}
+            loading={save.isPending}
+            onClick={() => {
+              setError(null);
+              save.mutate();
+            }}
+          >
+            保存
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

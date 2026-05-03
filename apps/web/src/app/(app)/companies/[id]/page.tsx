@@ -8,6 +8,7 @@ import {
   apiRequest,
   ApiClientError,
   type CompanyDetail,
+  type DeviceListResp,
   type UserListResp,
   type UserSummary,
 } from '@/lib/api';
@@ -34,6 +35,15 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
     queryFn: () =>
       apiRequest<UserListResp>('/api/v1/users', {
         query: { companyId: id, pageSize: 200 },
+      }),
+  });
+
+  // v2.8.1 Task 7: company-scoped device list for the bottom card.
+  const devicesQ = useQuery({
+    queryKey: ['devices', { companyId: id }],
+    queryFn: () =>
+      apiRequest<DeviceListResp>('/api/v1/devices', {
+        query: { ownerCompanyId: id, pageSize: 50 },
       }),
   });
 
@@ -223,6 +233,86 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                   </Td>
                   <Td className="text-xs text-slate-500">
                     {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('zh-CN') : '—'}
+                  </Td>
+                </Tr>
+              ))}
+            </TBody>
+          </Table>
+        )}
+      </Card>
+
+      {/* v2.8.1 Task 7: device snapshot for the company. Capped at 50
+          rows to keep the card light; deeper view → /devices?ownerCompanyId */}
+      <Card>
+        <CardHeader
+          title="设备清单"
+          description={
+            devicesQ.data
+              ? `共 ${devicesQ.data.total} 台${devicesQ.data.total > 50 ? '（仅显示前 50）' : ''}`
+              : '加载中…'
+          }
+          action={
+            <Link
+              href={`/devices?ownerCompanyId=${id}`}
+              className="text-xs text-sky-600 hover:underline"
+            >
+              查看全部 →
+            </Link>
+          }
+        />
+        {devicesQ.isLoading ? (
+          <div className="px-6 py-8 text-sm text-slate-400">加载中…</div>
+        ) : !devicesQ.data?.items.length ? (
+          <EmptyState message="暂无设备" />
+        ) : (
+          <Table>
+            <THead>
+              <Tr>
+                <Th>锁号</Th>
+                <Th>型号</Th>
+                <Th>状态</Th>
+                <Th>电量</Th>
+                <Th>最近上报</Th>
+              </Tr>
+            </THead>
+            <TBody>
+              {devicesQ.data.items.map((d) => (
+                <Tr key={d.id}>
+                  <Td>
+                    <Link
+                      href={`/devices/${d.id}`}
+                      className="font-mono text-sky-600 hover:underline"
+                    >
+                      {d.lockId}
+                    </Link>
+                  </Td>
+                  <Td className="text-xs text-slate-600">
+                    {d.model?.name ?? d.model?.code ?? '—'}
+                  </Td>
+                  <Td>
+                    <Badge>{d.status}</Badge>
+                  </Td>
+                  <Td className="text-xs">
+                    {d.lastBattery == null ? (
+                      <span className="text-slate-400">—</span>
+                    ) : (
+                      <span
+                        className={
+                          d.lastBattery < 20
+                            ? 'text-rose-500'
+                            : d.lastBattery < 50
+                              ? 'text-amber-500'
+                              : 'text-emerald-600'
+                        }
+                      >
+                        {d.lastBattery}%
+                      </span>
+                    )}
+                  </Td>
+                  <Td className="text-xs text-slate-500">
+                    {d.lastSeenAt
+                      ? new Date(d.lastSeenAt).toLocaleString('zh-CN')
+                      : '—'}
                   </Td>
                 </Tr>
               ))}

@@ -68,12 +68,10 @@ const groups: NavGroup[] = [
         icon: Factory,
         roles: ['vendor_admin', 'production_operator'],
       },
-      {
-        href: '/repairs',
-        label: '维修中库',
-        icon: Wrench,
-        roles: ['vendor_admin', 'company_admin', 'production_operator'],
-      },
+      // v2.8.1: 维修中库 lives in the new 维修管理 group below so
+      // company users can find it. Vendor admin sees the same entry
+      // (the /repairs API auto-scopes per role: vendor → all companies,
+      // company_admin → own company only).
     ],
   },
   {
@@ -108,6 +106,16 @@ const groups: NavGroup[] = [
         icon: Lock,
         roles: ['vendor_admin', 'company_admin', 'dept_admin', 'team_leader', 'member'],
       },
+      // v2.8.1: 使用中库 — quick filter to "what's actually deployed".
+      // We pass status=active because the /devices page currently
+      // accepts a single status; multi-status filtering can be added
+      // later if customers want shipped/delivered in the same view.
+      {
+        href: '/devices?status=active',
+        label: '使用中库',
+        icon: Boxes,
+        roles: ['company_admin', 'dept_admin', 'team_leader'],
+      },
       {
         href: '/devices/manage',
         label: '设备管理',
@@ -140,6 +148,23 @@ const groups: NavGroup[] = [
       },
     ],
   },
+  // v2.8.1: dedicated 维修管理 section visible to company users.
+  // Sits between 运维功能 and 管理设置 so the 报修 → 维修中库 flow
+  // is one click away. Vendor admin sees it too — same /repairs page,
+  // the API auto-scopes (vendor → all companies, company → own).
+  {
+    groupId: 'repair',
+    groupLabel: '🔧 维修管理',
+    groupRoles: ['vendor_admin', 'company_admin', 'dept_admin', 'team_leader', 'production_operator'],
+    items: [
+      {
+        href: '/repairs',
+        label: '维修中库',
+        icon: Wrench,
+        roles: ['vendor_admin', 'company_admin', 'dept_admin', 'team_leader', 'production_operator'],
+      },
+    ],
+  },
   {
     groupId: 'admin',
     groupLabel: '⚙️ 管理设置',
@@ -159,17 +184,19 @@ const groups: NavGroup[] = [
         icon: UsersRound,
         roles: ['vendor_admin', 'company_admin', 'dept_admin', 'team_leader'],
       },
+      // v2.8.1: 对接 API + 固件 OTA are vendor-only platform tools;
+      // customers don't need to see them.
       {
         href: '/integrations',
         label: '对接 API',
         icon: Plug,
-        roles: ['vendor_admin', 'company_admin'],
+        roles: ['vendor_admin'],
       },
       {
         href: '/firmware',
         label: '固件 OTA',
         icon: Cpu,
-        roles: ['vendor_admin', 'company_admin'],
+        roles: ['vendor_admin'],
       },
       {
         href: '/audit-logs',

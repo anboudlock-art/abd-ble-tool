@@ -377,6 +377,12 @@ export const UpdateUserSchema = z.object({
   name: z.string().min(1).max(64).optional(),
   email: z.string().email().max(128).optional().nullable(),
   employeeNo: z.string().max(32).optional().nullable(),
+  /** v2.8.1: company_admin can change non-platform roles. The API
+   *  enforces that company_admin cannot promote anyone to vendor_admin
+   *  or production_operator (those are platform-level roles). */
+  role: z
+    .enum(['vendor_admin', 'company_admin', 'dept_admin', 'team_leader', 'member', 'production_operator'])
+    .optional(),
   status: z.enum(['active', 'locked']).optional(),
 });
 export type UpdateUserInput = z.infer<typeof UpdateUserSchema>;
@@ -661,7 +667,14 @@ export type RepairStatusValue = z.infer<typeof RepairStatusEnum>;
 export const CreateRepairIntakeSchema = z.object({
   /// Optional — defaults to the device's current owner_company_id.
   sourceCompanyId: z.coerce.number().int().positive().optional(),
-  faultReason: z.string().min(1).max(255),
+  /// v2.8.1: structured fault tag from FaultCategory dropdown. When
+  /// present, the API copies the category label into faultReason for
+  /// backwards-compat with the legacy free-form column. APP / customer
+  /// flows should always pass faultCategoryId; vendor admin can still
+  /// type freeform via faultReason for edge cases.
+  faultCategoryId: z.coerce.number().int().positive().optional(),
+  /** Free-form description; required when faultCategoryId is absent. */
+  faultReason: z.string().min(1).max(255).optional(),
   notes: z.string().max(2000).optional(),
 });
 export type CreateRepairIntakeInput = z.infer<typeof CreateRepairIntakeSchema>;

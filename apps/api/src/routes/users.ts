@@ -607,7 +607,7 @@ export default async function userRoutes(app: FastifyInstance) {
     },
   );
 
-  /** Edit basic user attributes. Phone/role/companyId immutable here. */
+  /** Edit user attributes. v2.8.1 supports role changes within scope. */
   typed.put(
     '/users/:id',
     {
@@ -626,6 +626,17 @@ export default async function userRoutes(app: FastifyInstance) {
       if (ctx.role === 'company_admin') {
         if (target.role === 'vendor_admin') throw ApiError.forbidden();
         if (target.companyId !== ctx.companyId) throw ApiError.forbidden();
+        // v2.8.1: company_admin can re-rank within their company but
+        // cannot create platform-level roles. Block elevation to
+        // vendor_admin / production_operator.
+        if (
+          req.body.role === 'vendor_admin' ||
+          req.body.role === 'production_operator'
+        ) {
+          throw ApiError.forbidden(
+            'company_admin cannot assign platform-level roles',
+          );
+        }
       }
 
       const updated = await prisma.user.update({
